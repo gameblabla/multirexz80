@@ -13,6 +13,7 @@ endif
 # Possible choices : z80 (accurate but proprietary), eighty (EightyZ80's core, GPLv2)
 Z80_CORE = z80
 SCALE2X_UPSCALER = 1
+PROFILE_DIR ?= .
 PROFILE = 0
 ZIP_SUPPORT = 1
 STATIC_MEMORY ?= 0
@@ -44,7 +45,8 @@ OBJ_CP		= $(notdir $(patsubst %.cpp, %.o, $(SRC_CP)))
 OBJS		= $(OBJ_C) $(OBJ_CP)
 
 CFLAGS		= -Ofast -fdata-sections -ffunction-sections -mno-fp-exceptions -mno-check-zero-division -mframe-header-opt -fsingle-precision-constant -fno-common -mxgot -mips32 -mno-mips16 -fno-PIC -mno-abicalls -flto
-CFLAGS		+= -DALIGN_DWORD -DRS97 -Wall -Wextra -DNONBLOCKING_AUDIO
+CFLAGS		+= -mbranch-likely -mbranch-cost=2
+CFLAGS		+= -DALIGN_DWORD -DRS97 -Wall -Wextra -DNONBLOCKING_AUDIO -DMULTIREXZ80_SCALE2X_TARGET_NATIVE
 CFLAGS		+= $(FEATURE_DEFS) -DLSB_FIRST -std=gnu99
 CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/scalers -Isource/ports/$(PORT) -Isource/ports/sdl12_common -Isource/unzip -Isource/sdl -Isource/sound_output
 
@@ -52,9 +54,9 @@ SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate=/home/retrofw/profile_sms
+CFLAGS 		+= -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE), APPLY)
-CFLAGS		+= -fprofile-use
+CFLAGS		+= -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
 endif
 
 ifeq ($(PSG_ENGINE), mame_sn76489)

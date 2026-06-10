@@ -130,6 +130,7 @@
  *****************************************************************************/
 #include "shared.h"
 #include "z80.h"
+#include "debug_console.h"
 
 #undef INLINE
 #define INLINE static __inline__
@@ -189,6 +190,13 @@ INLINE uint8_t z80_fast_readmem(uint32_t address)
 
 #define cpu_readmem16(a) z80_fast_readmem((a))
 #define cpu_readop_arg(a) (z80_data_operand_fetch ? sms_readmem16((uint16_t)(a)) : cpu_readop(a))
+
+#if MULTIREXZ80_DEBUG_CONSOLE
+static uint8_t z80_debug_console_read8(uint16_t address)
+{
+	return cpu_readmem16(address);
+}
+#endif
 
 /****************************************************************************/
 /* The Z80 registers. halt is set to 1 when the CPU is halted, the refresh  */
@@ -3120,7 +3128,11 @@ OP(op,4f) { C = A;                                                              
 
 OP(op,50) { D = B;                                                                } /* LD   D,B         */
 OP(op,51) { D = C;                                                                } /* LD   D,C         */
-OP(op,52) {                                                                       } /* LD   D,D         */
+OP(op,52) {
+#if MULTIREXZ80_DEBUG_CONSOLE
+	multirexz80_debug_console_probe_lddd(PC, HL, DE, z80_debug_console_read8);
+#endif
+} /* LD   D,D         */
 OP(op,53) { D = E;                                                                } /* LD   D,E         */
 OP(op,54) { D = H;                                                                } /* LD   D,H         */
 OP(op,55) { D = L;                                                                } /* LD   D,L         */

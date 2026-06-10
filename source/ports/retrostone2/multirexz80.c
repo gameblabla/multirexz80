@@ -47,6 +47,9 @@ static int joy_numb = 1;
 
 static SDL_Surface* sdl_screen;
 static SDL_Surface *backbuffer;
+#ifdef SCALE2X_UPSCALER
+static SDL_Surface *scale2x_buf;
+#endif
 extern SDL_Surface *font;
 extern SDL_Surface *bigfontred;
 extern SDL_Surface *bigfontwhite;
@@ -56,14 +59,17 @@ static uint8_t selectpressed = 0;
 static uint8_t save_slot = 0;
 static uint8_t quit = 0;
 
-static const int8_t upscalers_available = 1;
+static const int8_t upscalers_available = 1
+#ifdef SCALE2X_UPSCALER
++1
+#endif
+;
 
 static int width_hold = 256;
 static int width_remember = 256;
 static int width_remove = 0;
 static int remember_res_height;
 
-static int scale2x_res = 1;
 static uint_fast8_t forcerefresh = 0;
 static uint_fast8_t dpad_input[4] = {0, 0, 0, 0};
 uint_fast16_t pixels_shifting_remove = 0;
@@ -173,8 +179,15 @@ static void video_update()
 	int target_w, target_h;
 
 	multirexz80_sdl12_get_active_view(&view);
-	target_w = (option.fullscreen == 0) ? view.w : HOST_WIDTH_RESOLUTION;
-	target_h = (option.fullscreen == 0) ? view.h : HOST_HEIGHT_RESOLUTION;
+	width_hold = view.w;
+	width_remove = view.x;
+
+	/* Retrostone2 follows the OpenDingux-style layout used by GCW0/RS97:
+	 * mode 0 is true 1:1 native output inside the fixed LCD scanout, mode 1
+	 * requests a source-sized mode for hardware/IPU scaling, and mode 2 keeps
+	 * the software Scale2x path on the fixed native surface. */
+	target_w = (option.fullscreen == 1) ? view.w : HOST_WIDTH_RESOLUTION;
+	target_h = (option.fullscreen == 1) ? view.h : HOST_HEIGHT_RESOLUTION;
 	if (remember_res_height != target_h || width_remember != target_w || forcerefresh == 1)
 	{
 		remember_res_height = target_h;
@@ -188,24 +201,56 @@ static void video_update()
 	src.w = (Uint16)view.w;
 	src.h = (Uint16)view.h;
 	SDL_FillRect(sdl_screen, NULL, 0);
-	if (option.fullscreen == 0)
+
+	switch (option.fullscreen)
 	{
-		dst.x = (Sint16)((sdl_screen->w - view.w) / 2);
-		dst.y = (Sint16)((sdl_screen->h - view.h) / 2);
-		dst.w = (Uint16)view.w;
-		dst.h = (Uint16)view.h;
-		if (dst.x < 0) dst.x = 0;
-		if (dst.y < 0) dst.y = 0;
-		retrostone2_blit32_to_screen(sms_bitmap, &src, sdl_screen, &dst);
-	}
-	else
-	{
-		multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w, view.h);
-		retrostone2_blit32_to_screen(sms_bitmap, &src, sdl_screen, &dst);
+		case 0:
+			dst.x = (Sint16)((sdl_screen->w - view.w) / 2);
+			dst.y = (Sint16)((sdl_screen->h - view.h) / 2);
+			dst.w = (Uint16)view.w;
+			dst.h = (Uint16)view.h;
+			if (dst.x < 0) dst.x = 0;
+			if (dst.y < 0) dst.y = 0;
+			retrostone2_blit32_to_screen(sms_bitmap, &src, sdl_screen, &dst);
+			break;
+
+		case 1:
+			dst.x = 0;
+			dst.y = 0;
+			dst.w = (Uint16)view.w;
+			dst.h = (Uint16)view.h;
+			retrostone2_blit32_to_screen(sms_bitmap, &src, sdl_screen, &dst);
+			break;
+
+		case 2:
+#ifdef SCALE2X_UPSCALER
+			if (scale2x_buf && view.w * 2 <= scale2x_buf->w && view.h * 2 <= scale2x_buf->h)
+			{
+				SDL_Rect scaled_src;
+				scale2x32((uint32_t *)sms_bitmap->pixels + view.y * view.pitch_pixels + view.x,
+				          (uint32_t *)scale2x_buf->pixels,
+				          sms_bitmap->pitch,
+				          scale2x_buf->pitch,
+				          view.w, view.h);
+				scaled_src.x = 0;
+				scaled_src.y = 0;
+				scaled_src.w = (Uint16)(view.w * 2);
+				scaled_src.h = (Uint16)(view.h * 2);
+#ifdef MULTIREXZ80_SCALE2X_TARGET_NATIVE
+				dst.x = 0;
+				dst.y = 0;
+				dst.w = (Uint16)sdl_screen->w;
+				dst.h = (Uint16)sdl_screen->h;
+#else
+				multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w * 2, view.h * 2);
+#endif
+				retrostone2_blit32_to_screen(scale2x_buf, &scaled_src, sdl_screen, &dst);
+			}
+#endif
+			break;
 	}
 	SDL_Flip(sdl_screen);
 }
-
 
 void smsp_state(uint8_t slot_number, uint8_t mode)
 {
@@ -808,6 +853,13 @@ static void Cleanup(void)
 		SDL_FreeSurface(sms_bitmap);
 		sms_bitmap = NULL;
 	}
+#ifdef SCALE2X_UPSCALER
+	if (scale2x_buf != NULL)
+	{
+		SDL_FreeSurface(scale2x_buf);
+		scale2x_buf = NULL;
+	}
+#endif
 	
 	if (bios.rom != NULL)
 	{
@@ -876,7 +928,7 @@ int main (int argc, char *argv[])
 	// Sometimes Game Gear games are not properly detected, force them accordingly
 	else if (strcmp(strrchr(argv[1], '.'), ".gg") == 0) option.console = 3;
 	
-	if (option.fullscreen < 0 && option.fullscreen > upscalers_available) option.fullscreen = 1;
+	if (option.fullscreen < 0 || option.fullscreen > upscalers_available) option.fullscreen = 1;
 	
 	// Load ROM
 	if(!load_rom(argv[1])) 
@@ -907,6 +959,9 @@ int main (int argc, char *argv[])
 	
 	sms_bitmap = retrostone2_create_xrgb8888_surface(multirexz80_sdl12_bitmap_width(), multirexz80_sdl12_bitmap_height());
 	backbuffer = retrostone2_create_xrgb8888_surface(320, 240);
+#ifdef SCALE2X_UPSCALER
+	scale2x_buf = retrostone2_create_xrgb8888_surface(multirexz80_sdl12_bitmap_width() * 2, multirexz80_sdl12_bitmap_height() * 2);
+#endif
 	font_drawing_set_target((font_pixel_t *)backbuffer->pixels, backbuffer->pitch / sizeof(font_pixel_t), backbuffer->w, backbuffer->h);
 	
 	SDL_JoystickEventState(SDL_ENABLE);

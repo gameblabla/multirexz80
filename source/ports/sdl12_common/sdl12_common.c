@@ -14,6 +14,42 @@
 
 #define DIAL_STEP 5
 
+static const multirexz80_sdl12_keyboard_key_t m5_keyboard_keys[] = {
+    {"Ctrl", 0, 0x01, SDLK_LCTRL}, {"Func", 0, 0x02, SDLK_TAB},
+    {"Shift", 0, 0x04, SDLK_LSHIFT}, {"RShift", 0, 0x08, SDLK_RSHIFT},
+    {"Space", 0, 0x40, SDLK_SPACE}, {"Enter", 0, 0x80, SDLK_RETURN},
+
+    {"1", 1, 0x01, SDLK_1}, {"2", 1, 0x02, SDLK_2},
+    {"3", 1, 0x04, SDLK_3}, {"4", 1, 0x08, SDLK_4},
+    {"5", 1, 0x10, SDLK_5}, {"6", 1, 0x20, SDLK_6},
+    {"7", 1, 0x40, SDLK_7}, {"8", 1, 0x80, SDLK_8},
+
+    {"Q", 2, 0x01, SDLK_q}, {"W", 2, 0x02, SDLK_w},
+    {"E", 2, 0x04, SDLK_e}, {"R", 2, 0x08, SDLK_r},
+    {"T", 2, 0x10, SDLK_t}, {"Y", 2, 0x20, SDLK_y},
+    {"U", 2, 0x40, SDLK_u}, {"I", 2, 0x80, SDLK_i},
+
+    {"A", 3, 0x01, SDLK_a}, {"S", 3, 0x02, SDLK_s},
+    {"D", 3, 0x04, SDLK_d}, {"F", 3, 0x08, SDLK_f},
+    {"G", 3, 0x10, SDLK_g}, {"H", 3, 0x20, SDLK_h},
+    {"J", 3, 0x40, SDLK_j}, {"K", 3, 0x80, SDLK_k},
+
+    {"Z", 4, 0x01, SDLK_z}, {"X", 4, 0x02, SDLK_x},
+    {"C", 4, 0x04, SDLK_c}, {"V", 4, 0x08, SDLK_v},
+    {"B", 4, 0x10, SDLK_b}, {"N", 4, 0x20, SDLK_n},
+    {"M", 4, 0x40, SDLK_m}, {",", 4, 0x80, SDLK_COMMA},
+
+    {"9", 5, 0x01, SDLK_9}, {"0", 5, 0x02, SDLK_0},
+    {"-", 5, 0x04, SDLK_MINUS}, {"^", 5, 0x08, SDLK_EQUALS},
+    {".", 5, 0x10, SDLK_PERIOD}, {"Down", 5, 0x20, SDLK_DOWN},
+    {"_", 5, 0x40, SDLK_BACKQUOTE}, {"Back", 5, 0x80, SDLK_BACKSPACE},
+
+    {"O", 6, 0x01, SDLK_o}, {"P", 6, 0x02, SDLK_p},
+    {"Up", 6, 0x04, SDLK_UP}, {"[", 6, 0x08, SDLK_LEFTBRACKET},
+    {"L", 6, 0x10, SDLK_l}, {"Left", 6, 0x20, SDLK_LEFT},
+    {"Right", 6, 0x40, SDLK_RIGHT}, {"]", 6, 0x80, SDLK_RIGHTBRACKET},
+};
+
 static void set_mask8(uint8_t *value, uint8_t mask, int32_t pressed)
 {
     if (pressed) *value |= mask;
@@ -32,6 +68,13 @@ void multirexz80_sdl12_keymap_defaults(multirexz80_sdl12_keymap_t *map)
     map->button2 = SDLK_LCTRL;
     map->start = SDLK_RETURN;
     map->select = SDLK_ESCAPE;
+    map->arcade_coin1 = SDLK_5;
+    map->arcade_coin2 = SDLK_6;
+    map->arcade_start1 = SDLK_1;
+    map->arcade_start2 = SDLK_2;
+    map->arcade_service = SDLK_9;
+    map->arcade_test = SDLK_F2;
+    map->virtual_keyboard = SDLK_TAB;
     map->keypad[0] = SDLK_0;
     map->keypad[1] = SDLK_1;
     map->keypad[2] = SDLK_2;
@@ -51,6 +94,53 @@ int multirexz80_sdl12_arcade_active(void)
     return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS;
 }
 
+int multirexz80_sdl12_keyboard_active(void)
+{
+#if MULTIREXZ80_ENABLE_SORDM5
+    return sms.console == CONSOLE_SORDM5;
+#else
+    return 0;
+#endif
+}
+
+int multirexz80_sdl12_keyboard_key_count(void)
+{
+    return (int)(sizeof(m5_keyboard_keys) / sizeof(m5_keyboard_keys[0]));
+}
+
+const multirexz80_sdl12_keyboard_key_t *multirexz80_sdl12_keyboard_key(int index)
+{
+    if (index < 0 || index >= multirexz80_sdl12_keyboard_key_count()) return NULL;
+    return &m5_keyboard_keys[index];
+}
+
+void multirexz80_sdl12_keyboard_set_key(int index, int32_t pressed)
+{
+    const multirexz80_sdl12_keyboard_key_t *key = multirexz80_sdl12_keyboard_key(index);
+    if (!key || !multirexz80_sdl12_keyboard_active()) return;
+    set_mask8(&input.m5_key[key->row], key->mask, pressed);
+}
+
+int multirexz80_sdl12_keyboard_from_sdl_key(SDLKey key, int32_t pressed)
+{
+    int i, handled = 0;
+    if (!multirexz80_sdl12_keyboard_active()) return 0;
+    for (i = 0; i < multirexz80_sdl12_keyboard_key_count(); i++)
+    {
+        if (key == m5_keyboard_keys[i].key)
+        {
+            set_mask8(&input.m5_key[m5_keyboard_keys[i].row], m5_keyboard_keys[i].mask, pressed);
+            handled = 1;
+        }
+    }
+    if (key == SDLK_ESCAPE)
+    {
+        input.m5_reset = pressed ? SORDM5_KEY_RESET : 0;
+        handled = 1;
+    }
+    return handled;
+}
+
 void multirexz80_sdl12_set_arcade_button(uint8_t mask, int32_t pressed)
 {
     if (!multirexz80_sdl12_arcade_active())
@@ -65,32 +155,32 @@ static int handle_arcade_key(SDLKey key, int32_t pressed, const multirexz80_sdl1
 {
     if (!multirexz80_sdl12_arcade_active()) return 0;
 
-    if (key == SDLK_5 || key == SDLK_KP5)
+    if (key == map->arcade_coin1 || key == SDLK_5 || key == SDLK_KP5)
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_COIN1, pressed);
         return 1;
     }
-    if (key == SDLK_6 || key == SDLK_KP6)
+    if (key == map->arcade_coin2 || key == SDLK_6 || key == SDLK_KP6)
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_COIN2, pressed);
         return 1;
     }
-    if (key == SDLK_1 || key == SDLK_KP1 || (map && key == map->start))
+    if (key == map->arcade_start1 || key == SDLK_1 || key == SDLK_KP1 || (map && key == map->start))
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_START1, pressed);
         return 1;
     }
-    if (key == SDLK_2 || key == SDLK_KP2)
+    if (key == map->arcade_start2 || key == SDLK_2 || key == SDLK_KP2)
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_START2, pressed);
         return 1;
     }
-    if (key == SDLK_9 || key == SDLK_KP9)
+    if (key == map->arcade_service || key == SDLK_9 || key == SDLK_KP9)
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_SERVICE, pressed);
         return 1;
     }
-    if (key == SDLK_F2)
+    if (key == map->arcade_test || key == SDLK_F2)
     {
         multirexz80_sdl12_set_arcade_button(INPUT_ARCADE_TEST, pressed);
         return 1;
@@ -152,6 +242,8 @@ uint32_t multirexz80_sdl12_update_key(SDLKey key, int32_t pressed,
     if (handle_arcade_key(key, pressed, map))
         return 1;
 
+    multirexz80_sdl12_keyboard_from_sdl_key(key, pressed);
+
     set_pad_key(key, pressed, map);
 
     if (sms.console == CONSOLE_COLECO)
@@ -168,21 +260,33 @@ static int key_down(const uint8_t *keys, SDLKey key)
     return keys[key] != 0;
 }
 
-void multirexz80_sdl12_update_arcade_from_key_state(const uint8_t *keys)
+void multirexz80_sdl12_update_arcade_from_key_state_mapped(const uint8_t *keys,
+                                  const multirexz80_sdl12_keymap_t *map)
 {
+    multirexz80_sdl12_keymap_t default_map;
     uint8_t arcade = 0;
     if (!multirexz80_sdl12_arcade_active())
     {
         input.arcade = 0;
         return;
     }
-    if (key_down(keys, SDLK_5) || key_down(keys, SDLK_KP5)) arcade |= INPUT_ARCADE_COIN1;
-    if (key_down(keys, SDLK_6) || key_down(keys, SDLK_KP6)) arcade |= INPUT_ARCADE_COIN2;
-    if (key_down(keys, SDLK_1) || key_down(keys, SDLK_KP1) || key_down(keys, SDLK_RETURN)) arcade |= INPUT_ARCADE_START1;
-    if (key_down(keys, SDLK_2) || key_down(keys, SDLK_KP2)) arcade |= INPUT_ARCADE_START2;
-    if (key_down(keys, SDLK_9) || key_down(keys, SDLK_KP9)) arcade |= INPUT_ARCADE_SERVICE;
-    if (key_down(keys, SDLK_F2)) arcade |= INPUT_ARCADE_TEST;
+    if (!map)
+    {
+        multirexz80_sdl12_keymap_defaults(&default_map);
+        map = &default_map;
+    }
+    if (key_down(keys, map->arcade_coin1) || key_down(keys, SDLK_5) || key_down(keys, SDLK_KP5)) arcade |= INPUT_ARCADE_COIN1;
+    if (key_down(keys, map->arcade_coin2) || key_down(keys, SDLK_6) || key_down(keys, SDLK_KP6)) arcade |= INPUT_ARCADE_COIN2;
+    if (key_down(keys, map->arcade_start1) || key_down(keys, map->start) || key_down(keys, SDLK_1) || key_down(keys, SDLK_KP1) || key_down(keys, SDLK_RETURN)) arcade |= INPUT_ARCADE_START1;
+    if (key_down(keys, map->arcade_start2) || key_down(keys, SDLK_2) || key_down(keys, SDLK_KP2)) arcade |= INPUT_ARCADE_START2;
+    if (key_down(keys, map->arcade_service) || key_down(keys, SDLK_9) || key_down(keys, SDLK_KP9)) arcade |= INPUT_ARCADE_SERVICE;
+    if (key_down(keys, map->arcade_test) || key_down(keys, SDLK_F2)) arcade |= INPUT_ARCADE_TEST;
     input.arcade = arcade;
+}
+
+void multirexz80_sdl12_update_arcade_from_key_state(const uint8_t *keys)
+{
+    multirexz80_sdl12_update_arcade_from_key_state_mapped(keys, NULL);
 }
 
 

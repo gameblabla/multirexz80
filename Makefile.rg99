@@ -12,6 +12,7 @@ PSG_ENGINE := $(SOUND_ENGINE)
 endif
 # Possible choices : z80 (accurate but proprietary), eighty (EightyZ80's core, GPLv2)
 Z80_CORE = z80
+PROFILE_DIR ?= .
 PROFILE = 0
 ZIP_SUPPORT = 1
 STATIC_MEMORY ?= 0
@@ -43,6 +44,7 @@ OBJ_CP		= $(notdir $(patsubst %.cpp, %.o, $(SRC_CP)))
 OBJS		= $(OBJ_C) $(OBJ_CP)
 
 CFLAGS		= -Ofast -fdata-sections -ffunction-sections -mplt -mno-shared -mframe-header-opt -fno-common -march=mips32 -mtune=mips32 -flto=auto
+CFLAGS		+= -mbranch-likely -mbranch-cost=2
 CFLAGS		+= -falign-functions=4 -falign-jumps=4 -falign-loops=4 -falign-labels=4 -fsingle-precision-constant 
 CFLAGS		+= -mno-fp-exceptions -mno-check-zero-division -fno-common
 CFLAGS		+= -DALIGN_DWORD -DNONBLOCKING_AUDIO -D_8BPP_COLOR
@@ -53,13 +55,9 @@ SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate="/media/mmcblk0p1/sms_gcda"
-LDFLAGS		= -lgcov
+CFLAGS 		+= -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE), APPLY)
-CFLAGS		+= -fprofile-use="./"
-LDFLAGS     = -nodefaultlibs
-else
-LDFLAGS     = -nodefaultlibs 
+CFLAGS		+= -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
 endif
 
 ifeq ($(PSG_ENGINE), mame_sn76489)

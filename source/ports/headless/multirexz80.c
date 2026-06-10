@@ -19,6 +19,7 @@
 
 #include "shared.h"
 #include "headless_platform.h"
+#include "debug_console.h"
 
 #define HEADLESS_BITMAP_WIDTH 400
 #define HEADLESS_BITMAP_HEIGHT 400
@@ -35,6 +36,8 @@ typedef struct cli_options
     const char *coleco_bios_path;
     const char *save_state_path;
     const char *load_state_path;
+    const char *debug_console_path;
+    const char *debug_console_stop_text;
     uint64_t frames;
     uint8_t skip_render;
     uint8_t force_console;
@@ -54,7 +57,7 @@ static void usage(const char *argv0)
         "\n"
         "Core options:\n"
         "  --frames N                 Run N frames (default: 300)\n"
-        "  --console NAME             auto,sms,sms2,gg,ggms,sg1000,coleco,sordm5,systeme,system1,psychos\n"
+        "  --console NAME             auto,sms,sms2,gg,ggms/ggsms,sg1000,coleco,sordm5,systeme,system1,psychos\n"
         "  --region NAME              auto,ntsc,pal,japan\n"
         "  --bios PATH                BIOS for the selected legacy machine; for .m5 this is Sord M5\n"
         "  --sms-bios PATH            SMS BIOS file\n"
@@ -72,10 +75,13 @@ static void usage(const char *argv0)
         "  --no-lightgun-cursor       Hide software lightgun cursor in captures\n"
         "\n"
         "Inspection options:\n"
-        "  --input-playback PATH      Text input script: frame pad0 pad1 system [analog...]\n"
-        "  --input-record PATH        Record per-frame input in the same text format\n"
+        "  --input-playback PATH      Input script: Nf:A taps, Nf:+A/-A holds, or legacy snapshots\n"
+        "  --input-record PATH        Record compact replay input script\n"
+        "  --input-tap-frames N       Hold Nf:ACTION tap entries for N frames (default 6)\n"
         "  --audio-wav PATH           Write generated stereo 16-bit PCM to WAV\n"
         "  --trace PATH               CSV trace of CPU frame snapshots and VDP/PSG/YM writes\n"
+        "  --debug-console PATH       Optional Emulicious/BGB debug console log; use - for stdout\n"
+        "  --debug-console-stop TEXT  Stop early once TEXT appears in the debug console log\n"
         "  --dump-prefix PREFIX       Write final memory/device dumps using PREFIX_* names\n"
         "  --dump-every N             Also dump every N frames\n"
         "  --screenshot PATH          Final screenshot as binary PPM\n"
@@ -113,7 +119,7 @@ static int set_console_option(const char *name)
     else if (!strcasecmp(name, "sms")) option.console = 1;
     else if (!strcasecmp(name, "sms2")) option.console = 2;
     else if (!strcasecmp(name, "gg")) option.console = 3;
-    else if (!strcasecmp(name, "ggms")) option.console = 4;
+    else if (!strcasecmp(name, "ggms") || !strcasecmp(name, "ggsms")) option.console = 4;
     else if (!strcasecmp(name, "sg1000")) option.console = 5;
     else if (!strcasecmp(name, "coleco")) option.console = 6;
     else if (!strcasecmp(name, "sordm5") || !strcasecmp(name, "m5")) option.console = 7;
@@ -186,8 +192,11 @@ static int parse_cli(int argc, char **argv, cli_options_t *cli)
         else if (!strcmp(a, "--no-render")) cli->skip_render = 1;
         else if (!strcmp(a, "--input-playback")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.input_playback_path = argv[i]; }
         else if (!strcmp(a, "--input-record")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.input_record_path = argv[i]; }
+        else if (!strcmp(a, "--input-tap-frames")) { uint64_t v = 0; if (!need_value(argc, argv, &i) || !parse_u64_arg(argv[i], &v)) return 0; cli->platform.input_tap_frames = (uint32_t)v; }
         else if (!strcmp(a, "--audio-wav")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.audio_wav_path = argv[i]; }
         else if (!strcmp(a, "--trace")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.trace_path = argv[i]; }
+        else if (!strcmp(a, "--debug-console")) { if (!need_value(argc, argv, &i)) return 0; cli->debug_console_path = argv[i]; }
+        else if (!strcmp(a, "--debug-console-stop")) { if (!need_value(argc, argv, &i)) return 0; cli->debug_console_stop_text = argv[i]; }
         else if (!strcmp(a, "--dump-prefix")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.dump_prefix = argv[i]; }
         else if (!strcmp(a, "--dump-every")) { uint64_t v; if (!need_value(argc, argv, &i) || !parse_u64_arg(argv[i], &v)) return 0; cli->platform.dump_every = (uint32_t)v; }
         else if (!strcmp(a, "--screenshot")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.screenshot_path = argv[i]; }
@@ -442,10 +451,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (!multirexz80_debug_console_open(cli.debug_console_path, cli.debug_console_stop_text))
+    {
+#if MULTIREXZ80_DEBUG_CONSOLE
+        fprintf(stderr, "Failed to open debug console output: %s\n", cli.debug_console_path ? cli.debug_console_path : "(null)");
+#else
+        fprintf(stderr, "This build has no debug console support; rebuild with ENABLE_DEBUG_CONSOLE=1.\n");
+#endif
+        cleanup();
+        return 1;
+    }
+
     system_poweron();
     if (cli.load_state_path && !system_load_state_file(cli.load_state_path))
     {
         fprintf(stderr, "Failed to load state: %s\n", cli.load_state_path);
+        multirexz80_debug_console_close();
         cleanup();
         return 1;
     }
@@ -457,6 +478,7 @@ int main(int argc, char **argv)
     if (!multirexz80_headless_platform_create(&platform, &cli.platform))
     {
         fprintf(stderr, "Failed to initialize headless inspection outputs.\n");
+        multirexz80_debug_console_close();
         cleanup();
         return 1;
     }
@@ -476,6 +498,7 @@ int main(int argc, char **argv)
         if (!multirexz80_headless_platform_begin_frame(platform, frame)) { ok = 0; break; }
         system_frame(cli.skip_render);
         if (!multirexz80_headless_platform_end_frame(platform, frame)) { ok = 0; break; }
+        if (multirexz80_debug_console_stop_requested()) break;
     }
 
     if (ok)
@@ -494,6 +517,7 @@ int main(int argc, char **argv)
     }
 
     multirexz80_headless_platform_destroy(platform);
+    multirexz80_debug_console_close();
     cleanup();
 
     return ok ? 0 : 1;

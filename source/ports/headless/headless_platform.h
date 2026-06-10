@@ -28,6 +28,7 @@ typedef struct multirexz80_headless_platform_options
     const char *video_y4m_path;
     uint32_t dump_every;
     uint32_t screenshot_every;
+    uint32_t input_tap_frames;
     uint8_t quiet;
 } multirexz80_headless_platform_options_t;
 

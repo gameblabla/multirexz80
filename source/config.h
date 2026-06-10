@@ -40,7 +40,7 @@ typedef struct {
 	uint8_t use_bios;
 	uint8_t soundlevel;
 	/* For input remapping */
-	uint32_t config_buttons[19];
+	uint32_t config_buttons[32];
 } t_config;
 extern t_config option;
 

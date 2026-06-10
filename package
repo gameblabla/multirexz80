@@ -1,7 +1,7 @@
 #!/bin/sh
 
 mkdir -p opk
-cp ./sms_sdl opk/sms_sdl
+cp ./multirexz80_sdl opk/multirexz80_sdl
 cp ./sms_sdl.png opk/sms.png
 cp ./docs/license opk/COPYING
 
@@ -18,18 +18,18 @@ esac
 
 print '[Desktop Entry]
 Type=Application
-Name=SMS Plus GX
-Comment=SMS/GG/SG emulator
-Exec=sms_sdl %f
+Name=MultirexZ80
+Comment=Multi Z80 emulator
+Exec=multirexz80_sdl %f
 Icon=sms
 Terminal=false
 Type=Application
 Categories=emulators;
 X-OD-NeedsDownscaling=true
 selectorbrowser=true
-SelectorFilter=sms,SMS,gg,GG,sg,SG,zip,ZIP,col,COL,ms,MS,bin,BIN
+SelectorFilter=sms,SMS,gg,GG,sg,SG,zip,ZIP,col,COL,ms,MS,bin,BIN,m5,M5
 ' > opk/default."$1".desktop
 
-mksquashfs ./opk smsplus_"$1".opk -all-root -noappend -no-exports -no-xattrs
+mksquashfs ./opk multirexz80_"$1".opk -all-root -noappend -no-exports -no-xattrs
 
 rm -r opk

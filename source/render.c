@@ -74,6 +74,9 @@ uint8_t *linebuf;
 
 /* Pixel 8-bit color tables */
 uint8_t sms_cram_expand_table[4];
+static uint8_t sms_cram_expand_r[4];
+static uint8_t sms_cram_expand_g[4];
+static uint8_t sms_cram_expand_b[4];
 uint8_t gg_cram_expand_table[16];
 
 /* Dirty pattern info */
@@ -132,6 +135,16 @@ static uint8_t systeme_object_index_count;
 static uint8_t *object_index_count_main_ptr = &object_index_count;
 static uint8_t *active_object_index_count = &object_index_count;
 #define object_index_count (*active_object_index_count)
+
+/* SMS/GG timed renderer state.  Gearsystem's corrected model parses and
+ * renders sprites for line+1 at the late render point of the current line.
+ * This renderer is line-buffered, so we capture the sprite list/mode for the
+ * next display line at that point, then consume it when that line's background
+ * is later rendered. */
+static object_info_t sms_timed_object_info[64];
+static uint8_t sms_timed_object_count;
+static uint8_t sms_timed_sprite_mode;
+static int32_t sms_timed_sprite_line = -1;
 
 /* Top Border area height */
 static uint8_t active_border[2][3] =
@@ -279,6 +292,10 @@ static const uint32_t atex[4] =
 static uint32_t bp_lut[0x10000];
 
 static void parse_satb(int32_t line);
+static void sms_timed_capture_sprites(int32_t line);
+static void sms_timed_capture_sprites_for_pipeline_only(int32_t line);
+static void sms_timed_render_captured_sprites(int32_t line);
+static void sms_timed_process_hidden_sprites(int32_t line, int display_disabled);
 static void update_bg_pattern_cache(void);
 #ifndef _8BPP_COLOR
 #ifdef MULTIREXZ80_RENDER_32BPP
@@ -550,10 +567,28 @@ void render_init(void)
 #endif
 	}
 
-	sms_cram_expand_table[0] =  0;
+	/* SMS VDP 2-bit DAC levels. These are intentionally per-channel,
+	 * matching the analog SMS palette expansion used by common reference
+	 * captures rather than simple 0/85/170/255 scaling. Keep the legacy
+	 * table populated for non-render users, but use the channel-specific
+	 * tables for actual RGB conversion. */
+	sms_cram_expand_table[0] = 0;
 	sms_cram_expand_table[1] = 0x55;
 	sms_cram_expand_table[2] = 0xAA;
 	sms_cram_expand_table[3] = 0xFF;
+
+	sms_cram_expand_r[0] = 0;
+	sms_cram_expand_r[1] = 82;
+	sms_cram_expand_r[2] = 172;
+	sms_cram_expand_r[3] = 255;
+	sms_cram_expand_g[0] = 0;
+	sms_cram_expand_g[1] = 84;
+	sms_cram_expand_g[2] = 169;
+	sms_cram_expand_g[3] = 254;
+	sms_cram_expand_b[0] = 0;
+	sms_cram_expand_b[1] = 82;
+	sms_cram_expand_b[2] = 172;
+	sms_cram_expand_b[3] = 255;
 
 	for(uint8_t i = 0; i < 16; i++)
 	{
@@ -637,6 +672,96 @@ void render_reset(void)
 
 static int32_t prev_line = -1;
 
+static uint8_t sms_sprite_mode_for_parse(void)
+{
+	if (sms.console == CONSOLE_SYSTEME)
+		return (uint8_t)((vdp.reg[1] & 0x03) | (vdp.reg[0] & 0x08));
+	return vdp.sprite_mode_latch;
+}
+
+static uint8_t sms_sprite_mode_for_draw(void)
+{
+	if (sms.console == CONSOLE_SYSTEME)
+		return (uint8_t)((vdp.reg[1] & 0x03) | (vdp.reg[0] & 0x08));
+	return vdp.sprite_mode_draw;
+}
+
+static void sms_mode4_refresh_sprite_status(int32_t line, int display_disabled)
+{
+	uint8_t *sat = &vdp.vram[vdp.satb & 0x3f00];
+	int phase = line & 7;
+	int start = phase << 5;
+	int visible_y_count = 0;
+	int offscreen_y_count = 0;
+	int list_end = 64;
+	int i;
+
+	if ((sms.console == CONSOLE_SYSTEME) || !vdp_timed_render_active() || (vdp.mode <= 7))
+		return;
+
+	if (vdp.extended == 0)
+	{
+		for (i = 0; i < 64; i++)
+		{
+			if (sat[i] == 0xd0)
+			{
+				list_end = i;
+				break;
+			}
+		}
+	}
+
+	/* When Mode 4 display fetches are disabled by blanking or R1 bit 6, the
+	 * SMS/GG VDP does not run the normal two-stage sprite renderer.  Recent
+	 * GG hardware tests show that it walks the SAT refresh stream instead: 256
+	 * SAT bytes, 32 bytes per scanline phase, repeated every eight scanlines.
+	 * Keep the visible sprite parser out of this path; only model the status
+	 * side effects that VDPTEST and hardware expose. */
+	for (i = 0; i < 32; i++)
+	{
+		int sat_index = (start + i) & 0xff;
+		uint8_t y = sat[sat_index];
+
+		/* The first 64 SAT bytes are Y entries.  Attribute bytes in the second
+		 * half are still fetched, but do not participate in the Y comparator. */
+		if ((sat_index >= 64) || (sat_index >= list_end))
+			continue;
+
+		if (y < 0xe0)
+			visible_y_count++;
+		else if (y >= 0xf0)
+			offscreen_y_count++;
+
+	}
+
+	/* Disabled-display sprite overflow is not the normal active renderer's
+	 * overflow test.  It is nevertheless observable when the SAT refresh phase
+	 * contains more than eight visible-range Y entries, and not when the entries
+	 * are all offscreen high-Y values. */
+	if (display_disabled && (visible_y_count > 8))
+		vdp_request_sprite_overflow(line);
+
+	/* Offscreen-high Y entries can feed stale/refresh data into the sprite
+	 * collision path even though there is no corresponding pixel fetch.  This
+	 * covers the SMS1/GG hardware behaviour behind VDPTEST #46 without drawing
+	 * or colliding normal offscreen-X/transparent sprites. */
+	if (offscreen_y_count >= 2)
+		vdp_request_sprite_collision(line, 0);
+}
+
+static void sms_timed_process_hidden_sprites(int32_t line, int display_disabled)
+{
+	if ((sms.console == CONSOLE_SYSTEME) || !vdp_timed_render_active() || (vdp.mode <= 7))
+		return;
+
+	sms_mode4_refresh_sprite_status(line, display_disabled);
+
+	/* Keep the one-line sprite-list pipeline primed for the first visible line
+	 * after a border/blank interval, but do not render hidden sprites into a
+	 * dummy line.  Hidden/display-off status comes from the refresh path above. */
+	sms_timed_capture_sprites_for_pipeline_only((line + 1) % vdp.lpf);
+}
+
 static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int transparent_blank, int32_t *out_vline)
 {
 	int32_t view = 1;
@@ -649,7 +774,12 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 	int32_t top_border = active_border[sms.display][vdp.extended];
 	int32_t vline = (line + top_border) % vdp.lpf;
 	
-	if (vline >= active_range[sms.display]) return 0;
+	if (vline >= active_range[sms.display])
+	{
+		if ((sms.console != CONSOLE_SYSTEME) && vdp_timed_render_active() && (vdp.mode > 7))
+			sms_timed_capture_sprites_for_pipeline_only((line + 1) % vdp.lpf);
+		return 0;
+	}
 
 	/* adjust for Game Gear screen */
 	top_border = top_border + (vdp.height - bitmap.viewport.h) / 2;
@@ -661,14 +791,18 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 	if (vdp.spr_ovr)
 	{
 		vdp.spr_ovr = 0;
-		vdp.status |= 0x40;
+		vdp_request_sprite_overflow(line);
 	}
 
 	/* Vertical borders */
 	if ((vline < top_border) || (vline >= (bitmap.viewport.h + top_border)))
 	{
-		/* Sprites are still processed offscreen */
-		if ((vdp.mode > 7) && (vdp.reg[1] & 0x40)) 
+		/* Sprites are still processed offscreen.  In the timed SMS/GG
+		 * renderer, keep sprite status evaluation alive even when the
+		 * border line itself is not output. */
+		if ((sms.console != CONSOLE_SYSTEME) && vdp_timed_render_active() && (vdp.mode > 7))
+			sms_timed_process_hidden_sprites(line, 0);
+		else if ((vdp.mode > 7) && (vdp.reg[1] & 0x40))
 			render_obj(line);
 		/* Line is only displayed where overscan is emulated */
 		view = 0;
@@ -685,8 +819,22 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 			/* Draw background */
 			render_bg(line);
 
-			/* Draw sprites */
-			render_obj(line);
+			if ((sms.console != CONSOLE_SYSTEME) && vdp_timed_render_active() && (vdp.mode > 7))
+			{
+				/* Consume the sprite list that was captured at the previous
+				 * late render event for this exact display line, then capture
+				 * the next line's list for the following scanline.  This maps
+				 * Gearsystem's ParseSprites(line+1)/RenderSprites(line+1)
+				 * ordering onto this line-buffered renderer without drawing the
+				 * line one pixel early. */
+				sms_timed_render_captured_sprites(line);
+				sms_timed_capture_sprites((line + 1) % vdp.lpf);
+			}
+			else
+			{
+				/* Draw sprites */
+				render_obj(line);
+			}
 
 #ifndef NOBLANKING_LEFTCOLUM
 			/* Blank leftmost column of display */
@@ -698,14 +846,33 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 		{
 			/* Background color or transparent disabled front layer */
 			memset(linebuf, transparent_blank ? 0 : BACKDROP_COLOR, width);
+			if ((sms.console != CONSOLE_SYSTEME) && vdp_timed_render_active() && (vdp.mode > 7))
+				sms_timed_process_hidden_sprites(line, 1);
 		}
 	}
 
-	/* Parse Sprites for next line */
-	if (vdp.mode > 7)
-		parse_satb(line);
-	else
-		parse_line(line);
+	/* If display is disabled again after the pre-active top-row fetch has
+	 * closed, the SMS status/playfield transition emits backdrop for two
+	 * scanlines.  This is keyed off the display-enable latch sequence, not
+	 * off the number or value of R8 writes. */
+	if (((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) &&
+	    (vdp.hscroll_top_next_armed & 0x20) && (vdp.mode > 7) &&
+	    (line >= 31) && (line < 33))
+	{
+		memset(linebuf, BACKDROP_COLOR, width);
+	}
+
+	/* Parse sprites for the legacy line-start renderer.  The timed SMS/GG
+	 * path evaluates the current sprite line immediately before drawing. */
+	if (!((sms.console != CONSOLE_SYSTEME) && vdp_timed_render_active() && (vdp.mode > 7)))
+	{
+		if (sms.console != CONSOLE_SYSTEME)
+			vdp_latch_sprite_mode();
+		if (vdp.mode > 7)
+			parse_satb(line);
+		else
+			parse_line(line);
+	}
 
 	/* Only draw lines within the video output range ! */
 	if (view)
@@ -816,14 +983,146 @@ void render_line(int32_t line)
 	render_select_context(0);
 }
 
-/* Draw the Master System background */
-void render_bg_sms(int32_t line)
+
+static int sms_gg_bg_fetch_cycle_for_column(int32_t column)
+{
+	/* Mode 4 background fetch advances at the VDP pixel rate, not at the Z80
+	 * instruction clock.  One Z80 cycle is 1.5 display pixels on SMS/GG, so an
+	 * 8-pixel tile column spans 16/3 Z80 cycles.  R2/VRAM writes made by raster
+	 * code become visible when the nametable entry for that tile column is
+	 * fetched.  Sampling every 12 Z80 cycles compressed mid-line table effects
+	 * horizontally, which made Tables Have Turned's spotlight too skinny.
+	 */
+	int32_t c = 59 + ((column * 16) / 3);
+	if (c < 0) c = 0;
+	if (c > 220) c = 220;
+	return c;
+}
+
+static uint8_t sms_gg_fetch_bg_pixel(uint16_t attr, int32_t row, int32_t x, int32_t fetch_cycle)
+{
+	uint16_t tile = attr & 0x01FF;
+	int32_t hflip = attr & 0x0200;
+	int32_t vflip = attr & 0x0400;
+	int32_t src_row = vflip ? (row ^ 7) : row;
+	int32_t src_x = hflip ? x : (x ^ 7);
+	uint16_t base = (uint16_t)((tile << 5) | (src_row << 2));
+	uint8_t p0 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 0), fetch_cycle);
+	uint8_t p1 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 1), fetch_cycle);
+	uint8_t p2 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 2), fetch_cycle);
+	uint8_t p3 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 3), fetch_cycle);
+	uint8_t bit = (uint8_t)(1u << src_x);
+	uint8_t c = (uint8_t)(((p0 & bit) ? 1 : 0) |
+	                    ((p1 & bit) ? 2 : 0) |
+	                    ((p2 & bit) ? 4 : 0) |
+	                    ((p3 & bit) ? 8 : 0));
+	return (uint8_t)(c | ((attr >> 7) & 0x30));
+}
+
+
+static int sms_top_scroll_active_for_line(int32_t line)
+{
+	return ((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) &&
+	       (vdp.hscroll_top_next_armed & 0x80) && (vdp.mode > 7) &&
+	       (line >= 0) && (line < 31) &&
+	       (vdp.hscroll_top != vdp.hscroll);
+}
+
+static int sms_top_cram_active_for_line(int32_t line)
+{
+	return ((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) &&
+	       vdp.cram_top_valid && (vdp.mode > 7) &&
+	       (line >= 0) && (line < 31);
+}
+
+static uint16_t sms_gg_ntab_from_reg2(uint8_t reg2)
+{
+	if (vdp.extended)
+		return (uint16_t)((((uint16_t)reg2 << 10) & 0x3000) | 0x0700);
+	return (uint16_t)(((uint16_t)reg2 << 10) & 0x3800);
+}
+
+static uint16_t sms_gg_fetch_nt_attr(int32_t line, int32_t v_line, int32_t column, int locked, int32_t fetch_cycle)
+{
+	uint8_t reg2 = vdp_reg_byte_for_bg_fetch(2, fetch_cycle);
+	uint16_t mask = (((sms.console == CONSOLE_SMS) && !(reg2 & 1)) ? (uint16_t)~0x400 : 0xFFFF);
+	uint16_t nt_base = sms_gg_ntab_from_reg2(reg2);
+	int32_t map_line = locked ? line : v_line;
+	uint16_t addr = (uint16_t)((nt_base + ((map_line >> 3) << 6) + ((column & 0x1F) << 1)) & mask);
+	uint8_t lo = vdp_vram_byte_for_bg_fetch(addr, fetch_cycle);
+	uint8_t hi = vdp_vram_byte_for_bg_fetch((uint16_t)(addr + 1), fetch_cycle);
+	return (uint16_t)(lo | ((uint16_t)hi << 8));
+}
+
+static uint8_t sms_gg_fetch_sprite_pixel(uint16_t tile, int32_t row, int32_t x, int32_t fetch_cycle)
+{
+	uint16_t base = (uint16_t)(((tile & 0x01FF) << 5) | ((row & 0x0F) << 2));
+	uint8_t p0 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 0), fetch_cycle);
+	uint8_t p1 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 1), fetch_cycle);
+	uint8_t p2 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 2), fetch_cycle);
+	uint8_t p3 = vdp_vram_byte_for_bg_fetch((uint16_t)(base + 3), fetch_cycle);
+	uint8_t bit = (uint8_t)(1u << (7 - (x & 7)));
+	return (uint8_t)(((p0 & bit) ? 1 : 0) |
+	               ((p1 & bit) ? 2 : 0) |
+	               ((p2 & bit) ? 4 : 0) |
+	               ((p3 & bit) ? 8 : 0));
+}
+
+static int sms_gg_sprite_fetch_cycle_for_x(int32_t x)
+{
+	(void)x;
+	return 28;
+}
+
+static int render_bg_sms_gg_timed_fetch(int32_t line)
 {
 	int32_t locked = 0;
 	int32_t yscroll_mask = (vdp.extended) ? 256 : 224;
 	int32_t v_line = (line + vdp.vscroll) % yscroll_mask;
+	int32_t row = v_line & 7;
+	int32_t hscroll = sms_top_scroll_active_for_line(line) ? (0x100 - vdp.hscroll_top) : (((vdp.reg[0] & 0x40) && (line < 0x10) && (sms.console != CONSOLE_GG)) ? 0 : (0x100 - vdp.hscroll));
+	int32_t shift = hscroll & 7;
+	int32_t x;
+
+	if (!vdp_timed_render_active() || (vdp.mode <= 7))
+		return 0;
+
+	for (x = 0; x < 256; x++)
+	{
+		int32_t scrolled_x = x + hscroll;
+		int32_t column = (scrolled_x >> 3) & 0x1F;
+		int32_t tile_x = scrolled_x & 7;
+		uint16_t attr;
+		int32_t fetch_cycle = sms_gg_bg_fetch_cycle_for_column(x >> 3);
+
+		if ((vdp.reg[0] & 0x80) && (!locked) && ((x >> 3) >= 24))
+		{
+			locked = 1;
+			row = line & 7;
+		}
+
+		if (shift && x < (8 - shift))
+		{
+			linebuf[x] = 0;
+			continue;
+		}
+
+		attr = sms_gg_fetch_nt_attr(line, v_line, column, locked, fetch_cycle);
+		linebuf[x] = sms_gg_fetch_bg_pixel(attr, row, tile_x, fetch_cycle);
+	}
+	return 1;
+}
+
+/* Draw the Master System background */
+void render_bg_sms(int32_t line)
+{
+	if (render_bg_sms_gg_timed_fetch(line)) return;
+
+	int32_t locked = 0;
+	int32_t yscroll_mask = (vdp.extended) ? 256 : 224;
+	int32_t v_line = (line + vdp.vscroll) % yscroll_mask;
 	int32_t v_row  = (v_line & 7) << 3;
-	int32_t hscroll = ((vdp.reg[0] & 0x40) && (line < 0x10) && (sms.console != CONSOLE_GG)) ? 0 : (0x100 - vdp.reg[8]);
+	int32_t hscroll = sms_top_scroll_active_for_line(line) ? (0x100 - vdp.hscroll_top) : (((vdp.reg[0] & 0x40) && (line < 0x10) && (sms.console != CONSOLE_GG)) ? 0 : (0x100 - vdp.hscroll));
 	int32_t column = 0;
 	uint16_t attr;
 	uint16_t SMS_VDP_BUG = (((sms.console == CONSOLE_SMS) && !(vdp.reg[2] & 1)) ? ~0x400 :0xFFFF);
@@ -903,10 +1202,11 @@ void render_obj_sms(int32_t line)
 	uint8_t *linebuf_ptr;
 	uint8_t *cache_ptr;
 
+	uint8_t sprite_mode = sms_sprite_mode_for_draw();
 	int32_t width = 8;
 
 	/* Adjust dimensions for double size sprites */
-	if(vdp.reg[1] & 0x01)
+	if(sprite_mode & 0x01)
 		width *= 2;
 
 	/* Draw sprites in front-to-back order */
@@ -926,13 +1226,13 @@ void render_obj_sms(int32_t line)
 		n = object_info[i].attr;
 
 		/* X position shift */
-		if(vdp.reg[0] & 0x08) xp -= 8;
+		if(sprite_mode & 0x08) xp -= 8;
 
 		/* Add MSB of pattern name */
 		if(vdp.reg[6] & 0x04) n |= 0x0100;
 
 		/* Mask LSB for 8x16 sprites */
-		if(vdp.reg[1] & 0x02) n &= 0x01FE;
+		if(sprite_mode & 0x02) n &= 0x01FE;
 
 		/* Point to offset in line buffer */
 		linebuf_ptr = (uint8_t *)&linebuf[xp];
@@ -946,16 +1246,21 @@ void render_obj_sms(int32_t line)
 		  end = (256 - xp);
 
 		/* Draw double size sprite */
-		if(vdp.reg[1] & 0x01)
+		if(sprite_mode & 0x01)
 		{
-			/* Retrieve tile data from cached nametable */
-			cache_ptr = (uint8_t *)&bg_pattern_cache[(n << 6) | ((yp >> 1) << 3)];
+			/* Retrieve tile data.  Timed GG rendering keeps a per-line VRAM
+			 * write log so sprite pattern fetches can see the value that was on
+			 * the bus when the sprite unit actually fetched this pixel. */
+			if (vdp_gamegear_timing_active() && vdp_timed_render_active())
+				cache_ptr = NULL;
+			else
+				cache_ptr = (uint8_t *)&bg_pattern_cache[(n << 6) | ((yp >> 1) << 3)];
 			
 			/* Draw sprite line (at 1/2 dot rate) */
 			for(x = start; x < end; x+=2)
 			{
-				/* Source pixel from cache */
-				sp = cache_ptr[(x >> 1)];
+				/* Source pixel from cache or timed VRAM fetch */
+				sp = cache_ptr ? cache_ptr[(x >> 1)] : sms_gg_fetch_sprite_pixel((uint16_t)n, (yp >> 1), (x >> 1), sms_gg_sprite_fetch_cycle_for_x(xp + x));
 
 				/* Only draw opaque sprite pixels */
 				if(sp)
@@ -968,25 +1273,26 @@ void render_obj_sms(int32_t line)
 
 					/* Check sprite collision */
 					/* No sprite collision for 9th sprite. This passes Flubba's test */
-					if ((bg & 0x40) && !(vdp.status & 0x20) && object_index_count != 9)
+					if ((bg & 0x40) && object_index_count != 9)
 					{
-						/* pixel-accurate SPR_COL flag */
-						vdp.status |= 0x20;
-						vdp.spr_col = (line << 8) | ((xp + x + 13) >> 1);
+						vdp_request_sprite_collision(line, xp + x);
 					}
 				}
 			}
 		}
 		else /* Regular size sprite (8x8 / 8x16) */
 		{
-			/* Retrieve tile data from cached nametable */
-			cache_ptr = (uint8_t *)&bg_pattern_cache[(n << 6) | (yp << 3)];
+			/* Retrieve tile data */
+			if (vdp_gamegear_timing_active() && vdp_timed_render_active())
+				cache_ptr = NULL;
+			else
+				cache_ptr = (uint8_t *)&bg_pattern_cache[(n << 6) | (yp << 3)];
 
 			/* Draw sprite line */
 			for(x = start; x < end; x++)
 			{
-				/* Source pixel from cache */
-				sp = cache_ptr[x];
+				/* Source pixel from cache or timed VRAM fetch */
+				sp = cache_ptr ? cache_ptr[x] : sms_gg_fetch_sprite_pixel((uint16_t)n, yp, x, sms_gg_sprite_fetch_cycle_for_x(xp + x));
 
 				/* Only draw opaque sprite pixels */
 				if(sp)
@@ -999,11 +1305,9 @@ void render_obj_sms(int32_t line)
 
 					/* Check sprite collision */
 					/* No sprite collision for 9th sprite. This passes Flubba's test */
-					if ((bg & 0x40) && !(vdp.status & 0x20) && object_index_count != 9)
+					if ((bg & 0x40) && object_index_count != 9)
 					{
-						/* pixel-accurate SPR_COL flag */
-						vdp.status |= 0x20;
-						vdp.spr_col = (line << 8) | ((xp + x + 13) >> 1);
+						vdp_request_sprite_collision(line, xp + x);
 					}
 				}
 			}
@@ -1018,6 +1322,29 @@ typedef uint32_t native_pixel_t;
 #else
 typedef uint16_t native_pixel_t;
 #endif
+#endif
+
+#ifndef _8BPP_COLOR
+static native_pixel_t sms_native_pixel_from_cram_byte(uint8_t data)
+{
+	int32_t r = sms_cram_expand_r[(data >> 0) & 3];
+	int32_t g = sms_cram_expand_g[(data >> 2) & 3];
+	int32_t b = sms_cram_expand_b[(data >> 4) & 3];
+	return MAKE_PIXEL(r, g, b);
+}
+
+static const uint8_t *sms_cram_for_output_line(int32_t line)
+{
+	if (((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) &&
+	    vdp_timed_render_active() && (vdp.mode > 7))
+	{
+		if (sms_top_cram_active_for_line(line))
+			return vdp.cram_top;
+		return vdp.cram_line_latch;
+	}
+	return NULL;
+}
+
 #endif
 
 static void palette_sync_target(vdp_t *ctx, int32_t index
@@ -1053,9 +1380,9 @@ static void palette_sync_target(vdp_t *ctx, int32_t index
 			g = (ctx->cram[index] >> 2) & 3;
 			b = (ctx->cram[index] >> 4) & 3;
 			
-			r = sms_cram_expand_table[r];
-			g = sms_cram_expand_table[g];
-			b = sms_cram_expand_table[b];
+			r = sms_cram_expand_r[r];
+			g = sms_cram_expand_g[g];
+			b = sms_cram_expand_b[b];
 		}
 	}
 	else
@@ -1079,9 +1406,9 @@ static void palette_sync_target(vdp_t *ctx, int32_t index
 			g = (tms_crom[color] >> 2) & 3;
 			b = (tms_crom[color] >> 4) & 3;
 
-			r = sms_cram_expand_table[r];
-			g = sms_cram_expand_table[g];
-			b = sms_cram_expand_table[b];
+			r = sms_cram_expand_r[r];
+			g = sms_cram_expand_g[g];
+			b = sms_cram_expand_b[b];
 		}
 	}
 	
@@ -1124,16 +1451,18 @@ static void parse_satb(int32_t line)
 	/* Sprite counter (64 max.) */
 	int32_t i = 0;
 
-	/* Line counter value */
-	uint8_t vc = vc_table[sms.display][vdp.extended][line];
 
 	/* Sprite height (8x8 by default) */
 	uint8_t yp;
 	uint8_t height = 8;
-	uint8_t zoomed = vdp.reg[1] & 0x01;
+	uint8_t sprite_mode = sms_sprite_mode_for_parse();
+	uint8_t zoomed = sprite_mode & 0x01;
+
+	if (sms.console != CONSOLE_SYSTEME)
+		vdp.sprite_mode_draw = sprite_mode;
   
 	/* Adjust height for 8x16 sprites */
-	if(vdp.reg[1] & 0x02) 
+	if(sprite_mode & 0x02) 
 		height <<= 1;
 
 	/* Adjust height for zoomed sprites */
@@ -1167,7 +1496,7 @@ static void parse_satb(int32_t line)
 			{
 				/* Flag is set only during active area */
 				if (line < vdp.height)
-				vdp.spr_ovr = 1;
+				vdp_request_sprite_overflow(line);
 
 				/* End of sprite parsing */
 				if (option.spritelimit)
@@ -1183,6 +1512,101 @@ static void parse_satb(int32_t line)
 			++object_index_count;
 		}
 	}
+}
+
+
+static uint8_t parse_satb_timed_to(object_info_t *dst, int32_t line, uint8_t *out_sprite_mode, int request_status)
+{
+	uint8_t *st = (uint8_t *)&vdp.vram[vdp.satb];
+	uint8_t sprite_mode = (uint8_t)((vdp.reg[1] & 0x03) | (vdp.reg[0] & 0x08));
+	uint8_t zoomed = (uint8_t)(sprite_mode & 0x01);
+	int32_t height = (sprite_mode & 0x02) ? 16 : 8;
+	uint8_t count = 0;
+	int32_t i;
+
+	if (zoomed)
+		height <<= 1;
+
+	*out_sprite_mode = sprite_mode;
+
+	for (i = 0; i < 64; i++)
+	{
+		int32_t sprite_y = (int32_t)st[i] + 1;
+		int32_t sprite_y2;
+		int32_t sprite_y_offscreen;
+		int32_t sprite_y_offscreen2;
+
+		if (vdp.extended == 0 && st[i] == 208)
+			return count;
+
+		sprite_y2 = sprite_y + height;
+		sprite_y_offscreen = ((sprite_y > 240) && (sprite_y <= 256)) ? (sprite_y - 256) : sprite_y;
+		sprite_y_offscreen2 = sprite_y_offscreen + height;
+
+		if (((line >= sprite_y) && (line < sprite_y2)) ||
+		    ((line >= sprite_y_offscreen) && (line < sprite_y_offscreen2)))
+		{
+			int32_t source_y = line - sprite_y;
+
+			if ((sprite_y > 240) && (sprite_y <= 256) && (line < vdp.height))
+				source_y = line - sprite_y_offscreen;
+
+			if (count == 8)
+			{
+				if (request_status && (line < vdp.height))
+					vdp_request_sprite_overflow(line);
+				if (option.spritelimit)
+					return count;
+			}
+
+			dst[count].yrange = (uint16_t)source_y;
+			dst[count].xpos = st[0x80 + (i << 1)];
+			dst[count].attr = st[0x81 + (i << 1)];
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+static void sms_timed_capture_sprites_ex(int32_t line, int request_status)
+{
+	sms_timed_object_count = parse_satb_timed_to(sms_timed_object_info, line, &sms_timed_sprite_mode, request_status);
+	sms_timed_sprite_line = line;
+}
+
+static void sms_timed_capture_sprites(int32_t line)
+{
+	sms_timed_capture_sprites_ex(line, 1);
+}
+
+static void sms_timed_capture_sprites_for_pipeline_only(int32_t line)
+{
+	sms_timed_capture_sprites_ex(line, 0);
+}
+
+static void sms_timed_render_captured_sprites(int32_t line)
+{
+	object_info_t *saved_info;
+	uint8_t *saved_count;
+	uint8_t saved_mode;
+
+	if (sms_timed_sprite_line != line)
+		return;
+
+	saved_info = active_object_info;
+	saved_count = active_object_index_count;
+	saved_mode = vdp.sprite_mode_draw;
+
+	active_object_info = sms_timed_object_info;
+	active_object_index_count = &sms_timed_object_count;
+	vdp.sprite_mode_draw = sms_timed_sprite_mode;
+	render_obj_sms(line);
+
+	active_object_info = saved_info;
+	active_object_index_count = saved_count;
+	vdp.sprite_mode_draw = saved_mode;
 }
 
 static void update_bg_pattern_cache(void)
@@ -1317,7 +1741,8 @@ static void remap_8_to_16(int32_t line)
 		uint32_t pitch_pixels = bitmap.pitch >> 1;
 		for(i = 0; i < width; i++)
 		{
-			uint16_t out = pixel[src[i] & PIXEL_MASK];
+			const uint8_t *line_cram = sms_cram_for_output_line(line);
+			uint16_t out = line_cram ? sms_native_pixel_from_cram_byte(line_cram[src[i] & PIXEL_MASK]) : pixel[src[i] & PIXEL_MASK];
 			uint32_t idx = (uint32_t)line * pitch_pixels + (uint32_t)i;
 			if (idx < LCD_PERSISTENCE_MAX_PIXELS)
 			{
@@ -1332,16 +1757,25 @@ static void remap_8_to_16(int32_t line)
 	else
 	{
 #ifndef MULTIREXZ80_DISABLE_FAST_REMAP
-		uint32_t *dst32 = (uint32_t *)(void *)p;
-		int32_t pairs = width >> 1;
-		if (remap16_pair_dirty) rebuild_remap16_pair_table();
-		for (i = 0; i < pairs; i++)
+		const uint8_t *line_cram = sms_cram_for_output_line(line);
+		if (line_cram)
 		{
-			uint32_t key = (uint32_t)src[(i << 1) + 0] | ((uint32_t)src[(i << 1) + 1] << 8);
-			write_dword(&dst32[i], remap16_pair_table[key]);
+			for(i = 0; i < width; i++)
+				p[i] = sms_native_pixel_from_cram_byte(line_cram[src[i] & PIXEL_MASK]);
 		}
-		if (width & 1)
-			p[width - 1] = pixel[src[width - 1] & PIXEL_MASK];
+		else
+		{
+			uint32_t *dst32 = (uint32_t *)(void *)p;
+			int32_t pairs = width >> 1;
+			if (remap16_pair_dirty) rebuild_remap16_pair_table();
+			for (i = 0; i < pairs; i++)
+			{
+				uint32_t key = (uint32_t)src[(i << 1) + 0] | ((uint32_t)src[(i << 1) + 1] << 8);
+				write_dword(&dst32[i], remap16_pair_table[key]);
+			}
+			if (width & 1)
+				p[width - 1] = pixel[src[width - 1] & PIXEL_MASK];
+		}
 #else
 		for(i = 0; i < width; i++)
 			p[i] = pixel[src[i] & PIXEL_MASK];
@@ -1367,7 +1801,8 @@ static void remap_8_to_32(int32_t line)
 		uint32_t pitch_pixels = bitmap.pitch >> 2;
 		for(i = 0; i < width; i++)
 		{
-			uint32_t out = pixel[src[i] & PIXEL_MASK];
+			const uint8_t *line_cram = sms_cram_for_output_line(line);
+			uint32_t out = line_cram ? sms_native_pixel_from_cram_byte(line_cram[src[i] & PIXEL_MASK]) : pixel[src[i] & PIXEL_MASK];
 			uint32_t idx = (uint32_t)line * pitch_pixels + (uint32_t)i;
 			if (idx < LCD_PERSISTENCE_MAX_PIXELS)
 			{
@@ -1381,8 +1816,17 @@ static void remap_8_to_32(int32_t line)
 	}
 	else
 	{
-		for(i = 0; i < width; i++)
-			p[i] = pixel[src[i] & PIXEL_MASK];
+		const uint8_t *line_cram = sms_cram_for_output_line(line);
+		if (line_cram)
+		{
+			for(i = 0; i < width; i++)
+				p[i] = sms_native_pixel_from_cram_byte(line_cram[src[i] & PIXEL_MASK]);
+		}
+		else
+		{
+			for(i = 0; i < width; i++)
+				p[i] = pixel[src[i] & PIXEL_MASK];
+		}
 	}
 
 	draw_lightgun_cursor_32(p, width, line);

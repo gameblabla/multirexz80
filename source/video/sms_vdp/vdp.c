@@ -49,13 +49,17 @@
 /* Mark a pattern as dirty */
 #define MARK_BG_DIRTY(addr) render_mark_bg_dirty_chip(0, (addr))
 
+static int vdp_addr_in_current_sat(uint16_t index);
+static void vdp_invalidate_sprite_status_pipeline(uint16_t index);
+static void vdp_record_vram_write(uint16_t index, uint8_t old_value);
 
 void vdp_vram_direct_write(uint16_t address, uint8_t data)
 {
 	int32_t index;
 	int32_t cycles_per_line = system_cycles_per_line();
 
-	if (((z80_get_elapsed_cycles() + 1) / cycles_per_line) > vdp.line)
+	vdp_render_scanline_if_due();
+	if (!vdp_timed_render_active() && (((z80_get_elapsed_cycles() + 1) / cycles_per_line) > vdp.line))
 	{
 		render_line((vdp.line + 1) % vdp.lpf);
 	}
@@ -63,8 +67,10 @@ void vdp_vram_direct_write(uint16_t address, uint8_t data)
 	index = address & 0x3FFF;
 	if (data != vdp.vram[index])
 	{
+		vdp_record_vram_write((uint16_t)index, vdp.vram[index]);
 		vdp.vram[index] = data;
 		render_mark_bg_dirty_chip(0, index);
+		vdp_invalidate_sprite_status_pipeline((uint16_t)index);
 	}
 }
 
@@ -77,6 +83,426 @@ vdp_t *vdp2_ptr = NULL;
 
 static uint8_t *systeme_vram_banks = NULL;
 static uint8_t systeme_active_vram_bank[2];
+static uint8_t sms_vdp_line_rendered;
+static uint8_t sms_vdp_line_render_skip;
+
+#define SMS_VDP_WRITE_LOG_CAP 256
+typedef struct
+{
+    uint16_t addr;
+    uint8_t old_value;
+    int16_t dot;
+} sms_vdp_write_log_t;
+static sms_vdp_write_log_t sms_vdp_write_log[SMS_VDP_WRITE_LOG_CAP];
+static uint16_t sms_vdp_write_log_count;
+
+#define SMS_VDP_REG_WRITE_LOG_CAP 128
+typedef struct
+{
+    uint8_t reg;
+    uint8_t old_value;
+    int16_t dot;
+} sms_vdp_reg_write_log_t;
+static sms_vdp_reg_write_log_t sms_vdp_reg_write_log[SMS_VDP_REG_WRITE_LOG_CAP];
+static uint16_t sms_vdp_reg_write_log_count;
+
+static void vdp_record_vram_write(uint16_t index, uint8_t old_value)
+{
+    int32_t cycles_per_line;
+    int32_t dot;
+
+    if (!vdp_timed_render_active())
+        return;
+
+    cycles_per_line = system_cycles_per_line();
+    if (cycles_per_line <= 0)
+        return;
+
+    dot = z80_get_elapsed_cycles() % cycles_per_line;
+    if (sms_vdp_write_log_count < SMS_VDP_WRITE_LOG_CAP)
+    {
+        sms_vdp_write_log[sms_vdp_write_log_count].addr = (uint16_t)(index & 0x3FFF);
+        sms_vdp_write_log[sms_vdp_write_log_count].old_value = old_value;
+        sms_vdp_write_log[sms_vdp_write_log_count].dot = (int16_t)dot;
+        sms_vdp_write_log_count++;
+    }
+}
+
+uint8_t vdp_vram_byte_for_bg_fetch(uint16_t address, int32_t fetch_cycle)
+{
+    uint16_t addr = (uint16_t)(address & 0x3FFF);
+    uint8_t value = vdp.vram[addr];
+    int i;
+
+    if (!vdp_timed_render_active())
+        return value;
+
+    for (i = (int)sms_vdp_write_log_count - 1; i >= 0; i--)
+    {
+        if ((sms_vdp_write_log[i].addr == addr) && (sms_vdp_write_log[i].dot > fetch_cycle))
+            value = sms_vdp_write_log[i].old_value;
+    }
+    return value;
+}
+
+static void vdp_record_reg_write(uint8_t reg, uint8_t old_value)
+{
+    int32_t dot;
+
+    if (!vdp_timed_render_active())
+        return;
+
+    dot = z80_get_elapsed_cycles() % system_cycles_per_line();
+    if (dot < 0)
+        dot = 0;
+    if (dot > 32767)
+        dot = 32767;
+
+    if (sms_vdp_reg_write_log_count < SMS_VDP_REG_WRITE_LOG_CAP)
+    {
+        sms_vdp_reg_write_log[sms_vdp_reg_write_log_count].reg = (uint8_t)(reg & 0x0f);
+        sms_vdp_reg_write_log[sms_vdp_reg_write_log_count].old_value = old_value;
+        sms_vdp_reg_write_log[sms_vdp_reg_write_log_count].dot = (int16_t)dot;
+        sms_vdp_reg_write_log_count++;
+    }
+}
+
+uint8_t vdp_reg_byte_for_bg_fetch(uint8_t reg, int32_t fetch_cycle)
+{
+    uint8_t r = (uint8_t)(reg & 0x0f);
+    uint8_t value = vdp.reg[r];
+    int i;
+
+    if (!vdp_timed_render_active())
+        return value;
+
+    for (i = (int)sms_vdp_reg_write_log_count - 1; i >= 0; i--)
+    {
+        if ((sms_vdp_reg_write_log[i].reg == r) && (sms_vdp_reg_write_log[i].dot > fetch_cycle))
+            value = sms_vdp_reg_write_log[i].old_value;
+    }
+    return value;
+}
+
+static int vdp_addr_in_current_sat(uint16_t index)
+{
+    uint16_t sat = (uint16_t)(vdp.satb & 0x3F00);
+    return (index >= sat) && (index < (uint16_t)(sat + 0x0100));
+}
+
+static void vdp_invalidate_sprite_status_pipeline(uint16_t index)
+{
+    if (vdp_addr_in_current_sat(index))
+    {
+        vdp.spr_col_pending = 0;
+        vdp.spr_ovr_pending = 0;
+    }
+}
+
+#define SMS_VDP_SPRITE_MODE_LATCH_CYCLE (CYCLES_PER_LINE - 15 + 2)
+
+int vdp_gamegear_timing_active(void)
+{
+	return (sms.console == CONSOLE_GG) || (sms.console == CONSOLE_GGMS);
+}
+
+int vdp_render_event_cycle(void)
+{
+	/* The line-buffered renderer samples the visible GG background at the early
+	 * display-fetch point.  Tarzan updates HUD tile pattern bytes during the
+	 * visible status-bar scanlines; sampling the whole line at the later sprite
+	 * timing point incorrectly lets those writes skip/replace rows of the HUD. */
+	return vdp_gamegear_timing_active() ? ((vdp.reg[8] || vdp.reg[9]) ? 28 : 186) : 195;
+}
+
+int vdp_hint_event_cycle(void)
+{
+	return vdp_gamegear_timing_active() ? 28 : 15;
+}
+
+int vdp_xscroll_event_cycle(void)
+{
+	/* Register 8 is not a live horizontal-scroll value.  It is latched near
+	 * the beginning of each scanline, before the eventual render event.  VDPTEST
+	 * writes around this boundary; without a separate latched value the left
+	 * column in the X-scroll latch page gets a visible discontinuity. */
+	return 0;
+}
+
+void vdp_latch_hscroll(void)
+{
+	vdp.hscroll = vdp.reg[8];
+	/* Match the Genesis Plus GX SMS renderer model: CRAM writes are
+	 * visible to scanlines only after the line has latched/fetched its
+	 * palette state.  The actual remap still happens when the line is
+	 * emitted, but it uses this per-scanline CRAM snapshot rather than
+	 * the later global CRAM state. */
+	memcpy(vdp.cram_line_latch, vdp.cram, sizeof(vdp.cram_line_latch));
+}
+
+static int vdp_sms_top_latch_console(void)
+{
+	return (sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2);
+}
+
+static int vdp_sms_top_latch_capture_window(void)
+{
+	/* This latch is the pre-active-display top/status-row fetch state.
+	 * Active-display splits (for example the Fantastic Dizzy language-logo
+	 * wave) must remain normal per-line register/palette effects. */
+	return vdp_sms_top_latch_console() && vdp_timed_render_active() &&
+	       (vdp.line >= vdp.height);
+}
+
+static void vdp_top_cram_capture_write(uint8_t index, uint8_t data)
+{
+	if (!vdp_sms_top_latch_capture_window())
+		return;
+	if (!vdp.cram_top_next_armed || (vdp.reg[1] & 0x40))
+		return;
+	if (!vdp.cram_top_capture_active)
+	{
+		memcpy(vdp.cram_top_next, vdp.cram, sizeof(vdp.cram_top_next));
+		vdp.cram_top_capture_active = 1;
+	}
+	vdp.cram_top_next[index & 0x3f] = data;
+}
+
+void vdp_frame_scroll_latch_start(void)
+{
+	/* The SMS-family VDP has an early pre-active-display fetch/latch window
+	 * for the first status tile rows. Keep that window as a normal latched
+	 * copy of R8: later register writes update the live per-scanline latch,
+	 * but they do not rewrite the already-prefetched top-row state. */
+	{
+		uint8_t hscroll_top_valid = vdp.hscroll_top_next_valid;
+		uint8_t top_transition_blank = (uint8_t)((vdp.hscroll_top_next_armed & 0x40) ? 0x20 : 0);
+		vdp.hscroll_top = hscroll_top_valid ? vdp.hscroll_top_next : vdp.reg[8];
+		vdp.hscroll_top_next = vdp.reg[8];
+		vdp.hscroll_top_next_valid = 0;
+		/* bit 0: arm next disabled-display R8 capture
+		 * bit 1: next-frame top prefetch closed by display-enable rising edge
+		 * bit 5: current-frame top/playfield transition blank
+		 * bit 6: next-frame transition blank, produced by a later display-disable
+		 *        edge after the top prefetch has already closed
+		 * bit 7: current-frame top hscroll latch is valid */
+		vdp.hscroll_top_next_armed = (uint8_t)(1 | (hscroll_top_valid ? 0x80 : 0) | top_transition_blank);
+	}
+
+	/* Some Codemasters SMS games split the top status band by loading a HUD
+	 * palette during the first disabled-display window, then replacing CRAM for
+	 * the scrolling playfield before normal active rendering.  The top band uses
+	 * that first disabled-window CRAM state; keep it separate from live CRAM. */
+	if (vdp_sms_top_latch_console() && vdp.cram_top_next_valid)
+	{
+		memcpy(vdp.cram_top, vdp.cram_top_next, sizeof(vdp.cram_top));
+		vdp.cram_top_valid = 1;
+	}
+	else
+	{
+		vdp.cram_top_valid = 0;
+	}
+	memcpy(vdp.cram_top_next, vdp.cram, sizeof(vdp.cram_top_next));
+	vdp.cram_top_next_valid = 0;
+	vdp.cram_top_next_armed = 1;
+	vdp.cram_top_capture_active = 0;
+}
+
+
+static int vdp_smsgg_console(void)
+{
+	/* Use the cycle-accurate SMS/GG timing path for every SMS-family VDP
+	 * frontend mode.  The SDL3 frontend auto-detects ordinary .sms images as
+	 * CONSOLE_SMS2 unless --console sms is supplied; leaving SMS2 on the legacy
+	 * line-end path makes VDPTEST's IRQ/HCounter/VINT edge tests fail in SDL3
+	 * even though the headless regression, which forces --console sms, passes.
+	 */
+	return (sms.console == CONSOLE_SMS) ||
+	       (sms.console == CONSOLE_SMS2) ||
+	       (sms.console == CONSOLE_GG) ||
+	       (sms.console == CONSOLE_GGMS);
+}
+
+int vdp_timed_render_active(void)
+{
+	return vdp_smsgg_console();
+}
+
+static void vdp_maybe_update_hscroll_on_reg8_write(uint8_t data)
+{
+	int32_t cycles_per_line;
+	int32_t dot;
+
+	if (!vdp_timed_render_active())
+		return;
+
+	cycles_per_line = system_cycles_per_line();
+	if (cycles_per_line <= 0)
+		return;
+
+	dot = z80_get_elapsed_cycles() % cycles_per_line;
+	/* The Z80 core reports port writes when the OUT instruction retires.
+	 * Around the reg-8 latch boundary this is later than the VDP
+	 * sample point.  Writes up to the first duplicated HCounter $F3 slot feed the
+	 * undrawn scanline; writes at the second $F3 slot have missed it. */
+	if ((dot <= 13) && (dot < vdp_render_event_cycle()))
+		vdp.hscroll = data;
+}
+
+void vdp_prepare_scanline(int32_t line, int skip_render)
+{
+	vdp.line = line;
+	sms_vdp_write_log_count = 0;
+	sms_vdp_reg_write_log_count = 0;
+	sms_vdp_line_render_skip = (uint8_t)(skip_render ? 1 : 0);
+	sms_vdp_line_rendered = (uint8_t)(skip_render ? 1 : 0);
+}
+
+void vdp_render_scanline_now(void)
+{
+	if (!vdp_timed_render_active())
+		return;
+	if (sms_vdp_line_rendered || sms_vdp_line_render_skip)
+		return;
+	render_line(vdp.line);
+	sms_vdp_line_rendered = 1;
+}
+
+void vdp_render_scanline_if_due(void)
+{
+	int32_t cycles_per_line;
+	int32_t cyc;
+	int32_t line;
+	int32_t dot;
+
+	if (!vdp_timed_render_active())
+		return;
+	if (sms_vdp_line_rendered || sms_vdp_line_render_skip)
+		return;
+
+	cycles_per_line = system_cycles_per_line();
+	if (cycles_per_line <= 0)
+		return;
+
+	cyc = z80_get_elapsed_cycles();
+	line = (cyc / cycles_per_line) % vdp.lpf;
+	dot = cyc % cycles_per_line;
+	if ((line == vdp.line) && (dot >= vdp_render_event_cycle()))
+	{
+		render_line(vdp.line);
+		sms_vdp_line_rendered = 1;
+	}
+}
+
+static uint8_t vdp_sprite_mode_from_regs(const vdp_t *ctx)
+{
+	return (uint8_t)((ctx->reg[1] & 0x03) | (ctx->reg[0] & 0x08));
+}
+
+void vdp_latch_sprite_mode(void)
+{
+	vdp.sprite_mode_latch = vdp_sprite_mode_from_regs(&vdp);
+}
+
+static int vdp_event_reached(int32_t event_line, int32_t event_cycle)
+{
+    int32_t cycles_per_line = system_cycles_per_line();
+    int32_t cyc;
+    int32_t line;
+    int32_t dot;
+
+    if (cycles_per_line <= 0)
+        return 0;
+
+    cyc = z80_get_elapsed_cycles();
+    line = (cyc / cycles_per_line) % vdp.lpf;
+    dot = cyc % cycles_per_line;
+
+    if (line == event_line)
+        return dot >= event_cycle;
+
+    /* Sprite status requests are generated for the current frame and reset at
+     * frame start, so a later scanline number means the event has passed. */
+    return line > event_line;
+}
+
+void vdp_request_sprite_collision(int32_t line, int32_t x)
+{
+    int32_t offset;
+    int32_t cycle;
+
+    if ((vdp.status & 0x20) || vdp.spr_col_pending)
+        return;
+
+    if (x < 0) x = 0;
+    if (x > 255) x = 255;
+
+    offset = vdp_gamegear_timing_active() ? 22 : 10;
+    cycle = offset + ((x * system_cycles_per_line()) / 256);
+    if (cycle >= system_cycles_per_line())
+        cycle = system_cycles_per_line() - 1;
+
+    vdp.spr_col_line = line;
+    vdp.spr_col_cycle = cycle;
+    vdp.spr_col_pending = 1;
+    vdp.spr_col = (line << 16) | cycle;
+}
+
+void vdp_request_sprite_overflow(int32_t line)
+{
+    int32_t cycle;
+
+    if ((vdp.status & 0x40) || vdp.spr_ovr_pending)
+        return;
+
+    cycle = vdp_gamegear_timing_active() ? 27 : 15;
+    vdp.spr_ovr_line = line;
+    vdp.spr_ovr_cycle = cycle;
+    vdp.spr_ovr_pending = 1;
+}
+
+static void vdp_update_sprite_status_for_now(void)
+{
+    if (vdp.spr_col_pending && vdp_event_reached(vdp.spr_col_line, vdp.spr_col_cycle))
+    {
+        vdp.status |= 0x20;
+        vdp.spr_col_pending = 0;
+    }
+
+    if (vdp.spr_ovr_pending && vdp_event_reached(vdp.spr_ovr_line, vdp.spr_ovr_cycle))
+    {
+        vdp.status |= 0x40;
+        vdp.spr_ovr_pending = 0;
+    }
+}
+
+void vdp_update_status_end_of_scanline(void)
+{
+    vdp_update_sprite_status_for_now();
+}
+
+static int vdp_sprite_mode_write_is_before_latch(void)
+{
+	int32_t cycles_per_line = system_cycles_per_line();
+	int32_t dot;
+
+	if (cycles_per_line <= 0)
+		return 1;
+
+	/* The SMS/GG VDP samples sprite size/shift shortly before the next
+	 * scanline.  Writes after that point must not retroactively alter the
+	 * already-scanned sprite line.  10 master pixels correspond to about 15
+	 * Z80 cycles in the 228-cycle SMS line model, matching the timing used by
+	 * the PicoDrive fix this is based on. */
+	dot = z80_get_elapsed_cycles() % cycles_per_line;
+	return dot < SMS_VDP_SPRITE_MODE_LATCH_CYCLE;
+}
+
+static void vdp_latch_sprite_mode_if_visible_to_next_line(void)
+{
+	if (vdp_sprite_mode_write_is_before_latch())
+		vdp_latch_sprite_mode();
+}
 
 #define SYSTEME_VRAM_BANK_SIZE 0x4000
 #define SYSTEME_VRAM_BANK_COUNT 4
@@ -277,6 +703,20 @@ void vdp_reset(void)
 	vdp.sa    = (vdp.reg[5] <<  7) & 0x3F80;
 	vdp.sg    = (vdp.reg[6] << 11) & 0x3800;
 	vdp.bd    = (vdp.reg[7] & 0x0F);
+	vdp.hscroll = vdp.reg[8];
+	vdp.hscroll_top = vdp.reg[8];
+	vdp.hscroll_top_next = vdp.reg[8];
+	vdp.hscroll_top_next_valid = 0;
+	vdp.hscroll_top_next_armed = 1;
+	memcpy(vdp.cram_top, vdp.cram, sizeof(vdp.cram_top));
+	memcpy(vdp.cram_top_next, vdp.cram, sizeof(vdp.cram_top_next));
+	memcpy(vdp.cram_line_latch, vdp.cram, sizeof(vdp.cram_line_latch));
+	vdp.cram_top_valid = 0;
+	vdp.cram_top_next_valid = 0;
+	vdp.cram_top_next_armed = 1;
+	vdp.cram_top_capture_active = 0;
+	vdp.sprite_mode_latch = vdp_sprite_mode_from_regs(&vdp);
+	vdp.sprite_mode_draw = vdp.sprite_mode_latch;
 
 	bitmap.viewport.changed = 1;
 
@@ -390,8 +830,61 @@ void viewport_check(void)
 
 static void vdp_reg_w(uint8_t r, uint8_t d)
 {
-	/* Store register data */
+	uint8_t old_sprite_mode = vdp_sprite_mode_from_regs(&vdp);
+	uint8_t old_reg1 = vdp.reg[1];
+
+	/* Store register data.  The renderer can later reconstruct the register
+	 * value visible at each background fetch slot by walking this per-line log
+	 * backwards from the final value. */
+	vdp_record_reg_write(r, vdp.reg[r]);
 	vdp.reg[r] = d;
+	if ((r == 1) && vdp_sms_top_latch_console() && vdp.cram_top_capture_active &&
+	    !(old_reg1 & 0x40) && (d & 0x40))
+	{
+		vdp.cram_top_next_valid = 1;
+		vdp.cram_top_next_armed = 0;
+		vdp.cram_top_capture_active = 0;
+	}
+	if ((r == 1) && vdp_sms_top_latch_capture_window())
+	{
+		uint8_t old_display = (uint8_t)(old_reg1 & 0x40);
+		uint8_t new_display = (uint8_t)(d & 0x40);
+		if (!old_display && new_display && vdp.hscroll_top_next_valid)
+			vdp.hscroll_top_next_armed |= 0x02;
+		else if (old_display && !new_display && vdp.hscroll_top_next_valid &&
+		         (vdp.hscroll_top_next_armed & 0x02))
+			vdp.hscroll_top_next_armed |= 0x40;
+	}
+	if (r == 0x08)
+	{
+		if (vdp_sms_top_latch_capture_window() &&
+		    (vdp.hscroll_top_next_armed & 0x01) && !(vdp.reg[1] & 0x40))
+		{
+			vdp.hscroll_top_next = d;
+			vdp.hscroll_top_next_valid = 1;
+			vdp.hscroll_top_next_armed &= (uint8_t)~0x01;
+		}
+		vdp_maybe_update_hscroll_on_reg8_write(d);
+	}
+	if ((r == 0 || r == 1) && vdp_smsgg_console() && (vdp.reg[1] & 0x40) && (vdp.line < vdp.height))
+	{
+		uint8_t new_sprite_mode = vdp_sprite_mode_from_regs(&vdp);
+		uint8_t changed_sprite_mode = (uint8_t)((old_sprite_mode ^ new_sprite_mode) & 0x0B);
+		/*
+		 * Gearsystem's Madou timing fix is not limited to the 2X zoom bit.
+		 * Madou also changes the 8x16 sprite-size bit during active display
+		 * (for example reg1 0xE0 <-> 0xE2 around the character scene).
+		 *
+		 * Keep the old compatibility behaviour for games that change only the
+		 * 8x16/shift bits early in the line (Drift 2 depends on that output),
+		 * but switch to late rendering when such a write occurs after the real
+		 * render event.  Zoom changes remain force-timed because the original
+		 * bug class was explicitly 2X sprite zoom.
+		 */
+		if ((changed_sprite_mode & 0x01) ||
+		    (changed_sprite_mode && ((z80_get_elapsed_cycles() % system_cycles_per_line()) >= vdp_render_event_cycle())))
+			vdp.timed_render = 1;
+	}
 	switch(r)
 	{
 	case 0x00: /* Mode Control No. 1 */
@@ -401,6 +894,7 @@ static void vdp_reg_w(uint8_t r, uint8_t d)
 			else z80_set_irq_line(0, CLEAR_LINE);
 		}
 		viewport_check();
+		vdp_latch_sprite_mode_if_visible_to_next_line();
 	break;
     case 0x01: /* Mode Control No. 2 */
 		if(vdp.vint_pending)
@@ -418,6 +912,7 @@ static void vdp_reg_w(uint8_t r, uint8_t d)
 			}
 		}
 		viewport_check();
+		vdp_latch_sprite_mode_if_visible_to_next_line();
 	break;
 
     case 0x02: /* Name Table A Base Address */
@@ -684,9 +1179,12 @@ void vdp_write(int32_t offset, uint8_t data)
 {
 	MULTIREXZ80_TRACE_VDP_WRITE("sms", offset, data);
 	int32_t index;
-	if (((z80_get_elapsed_cycles() + 1) / system_cycles_per_line()) > vdp.line)
+	vdp_render_scanline_if_due();
+	if (!vdp_timed_render_active() && (((z80_get_elapsed_cycles() + 1) / system_cycles_per_line()) > vdp.line))
 	{
-		/* render next line now BEFORE updating register */
+		/* Legacy line-start renderer guard: render next line before updating register.
+		 * Timed SMS/GG rendering must not pre-render the next line before its
+		 * late render event, or late sprite-mode writes can still leak through. */
 		render_line((vdp.line+1)%vdp.lpf);
 	}
 
@@ -704,14 +1202,17 @@ void vdp_write(int32_t offset, uint8_t data)
           index = (vdp.addr & 0x3FFF);
           if(data != vdp.vram[index])
           {
+            vdp_record_vram_write((uint16_t)index, vdp.vram[index]);
             vdp.vram[index] = data;
             MARK_BG_DIRTY(vdp.addr);
+            vdp_invalidate_sprite_status_pipeline((uint16_t)index);
           }
           vdp.buffer = data;
           break;
     
         case 3: /* CRAM write */
           index = (vdp.addr & 0x1F);
+          vdp_top_cram_capture_write((uint8_t)index, data);
           if(data != vdp.cram[index])
           {
             vdp.cram[index] = data;
@@ -753,15 +1254,43 @@ void vdp_write(int32_t offset, uint8_t data)
   }
 }
 
+static int vdp_uses_gg_vcounter_phase(void)
+{
+    /*
+     * Gearsystem models the GG V counter as the scanline latched at the
+     * VCOUNT timing point: reads before the VCOUNT event still observe the
+     * previous line, reads after it observe the current line.  Do this only
+     * for true Game Gear mode selected by the frontend.  System E reuses an
+     * SMS/GG-derived VDP but is driven through CONSOLE_SYSTEME; keeping the
+     * legacy phase there preserves existing System E timing/regression output.
+     */
+    return (sms.console == CONSOLE_GG) && (option.console == 3);
+}
+
 static int vdp_vcounter_line_for_now(void)
 {
+    int32_t cycles_per_line = system_cycles_per_line();
     int32_t cyc = z80_get_elapsed_cycles();
-    int32_t line = (cyc / system_cycles_per_line()) % vdp.lpf;
-    int32_t dot = cyc % system_cycles_per_line();
-    /* Gearsystem's Madou fix uses separate GG timings: VCOUNT/FLAG_VINT at
-     * cycle 28/27 instead of the SMS-era 25/25. */
-    int32_t vcount_cycle = (sms.console == CONSOLE_GG) ? 28 : 25;
-    if (dot >= vcount_cycle) line = (line + 1) % vdp.lpf;
+    int32_t line = (cyc / cycles_per_line) % vdp.lpf;
+    int32_t dot = cyc % cycles_per_line;
+    int32_t vcount_cycle = 15;
+
+    if (cycles_per_line <= 0)
+        return vdp.line;
+
+    /* The V counter increments part-way through the scanline, not at the
+     * beginning.  Gearsystem initializes it to the final frame line and then
+     * increments at TIMING_VCOUNT, so reads before the event still see the
+     * previous line and reads after it see the current line.  The previous
+     * SMS path was one line ahead, which is visible in VDPTEST and can break
+     * games that poll VCounter for raster timing. */
+    if (vdp_gamegear_timing_active())
+        vcount_cycle = 28;
+
+    if (dot < vcount_cycle)
+        line = (line + vdp.lpf - 1) % vdp.lpf;
+
+    (void)vdp_uses_gg_vcounter_phase;
     return line;
 }
 
@@ -770,9 +1299,9 @@ static void vdp_update_vint_flag_for_now(void)
     int32_t cyc = z80_get_elapsed_cycles();
     int32_t line = (cyc / system_cycles_per_line()) % vdp.lpf;
     int32_t dot = cyc % system_cycles_per_line();
-    int32_t flag_cycle = (sms.console == CONSOLE_GG) ? 27 : 25;
+    int32_t flag_cycle = vdp_gamegear_timing_active() ? 27 : 15;
 
-    if ((line == vdp.height) && (dot >= flag_cycle))
+    if ((line == ((int32_t)vdp.height + 1)) && (dot >= flag_cycle))
     {
         vdp.status |= 0x80;
         vdp.vint_pending = 1;
@@ -802,27 +1331,22 @@ uint8_t vdp_read(int32_t offset)
 		return temp;
 		case 1: /* Status flags */
 		{
+			vdp_render_scanline_if_due();
 			vdp_update_vint_flag_for_now();
-			/* cycle-accurate SPR_OVR and INT flags */
-			int32_t cyc   = z80_get_elapsed_cycles();
-			int32_t line  = vdp.line;
-			/*
-			 * This is needed for :
-			 * - Fantastic Dizzy (otherwise, top bar will flicker)
-			 * - Madou Monogatari I GG (otherwise, sprite will be displayed incorrectly)
-			*/
-			if ((cyc / system_cycles_per_line()) > line)
-			{
-				if (line == vdp.height) vdp.status |= 0x80;
-				line = (line + 1)%vdp.lpf;
-				render_line(line);
-			}
+			vdp_update_sprite_status_for_now();
 
 			/* low 5 bits return non-zero data (fixes PGA Tour Golf course map introduction) */
 			temp = vdp.status | 0x1f;
 
-			/* clear flags */
-			vdp.status = 0;
+			/* Clear visible flags.  The SMS VDP status port is also read by the
+			 * standard IM 1 IRQ vector solely to acknowledge frame/line IRQs.
+			 * Keep already-latched sprite collision/overflow bits alive through
+			 * that IRQ acknowledge read so the external status poll that timed
+			 * the sprite event can still observe it. */
+			if ((Z80.pc.w.l >= 0x0038) && (Z80.pc.w.l <= 0x0040))
+				vdp.status &= 0x60;
+			else
+				vdp.status = 0;
 			vdp.pending = 0;
 			vdp.vint_pending = 0;
 			vdp.hint_pending = 0;
@@ -830,17 +1354,6 @@ uint8_t vdp_read(int32_t offset)
 			if (sms.console != CONSOLE_SORDM5)
 #endif
 				z80_set_irq_line(vdp.irq, CLEAR_LINE);
-
-			/* cycle-accurate SPR_COL flag */
-			if (temp & 0x20)
-			{
-				uint8_t hc = hc_256[system_hcounter_index()];
-				if ((line == (vdp.spr_col >> 8)) && ((hc < (vdp.spr_col & 0xff)) || (hc > 0xf3)))
-				{
-					vdp.status |= 0x20;
-					temp &= ~0x20;
-				}
-			}
 			return temp;
 		}
 	}
@@ -873,9 +1386,12 @@ void gg_vdp_write(int32_t offset, uint8_t data)
 	MULTIREXZ80_TRACE_VDP_WRITE("gg", offset, data);
 	int32_t index;
 
-	if (((z80_get_elapsed_cycles() + 1) / system_cycles_per_line()) > vdp.line)
+	vdp_render_scanline_if_due();
+	if (!vdp_timed_render_active() && (((z80_get_elapsed_cycles() + 1) / system_cycles_per_line()) > vdp.line))
 	{
-		/* render next line now BEFORE updating register */
+		/* Legacy line-start renderer guard: render next line before updating register.
+		 * Timed SMS/GG rendering must not pre-render the next line before its
+		 * late render event, or late sprite-mode writes can still leak through. */
 		render_line((vdp.line+1)%vdp.lpf);
 	}
 
@@ -891,8 +1407,10 @@ void gg_vdp_write(int32_t offset, uint8_t data)
 				index = (vdp.addr & 0x3FFF);
 				if(data != vdp.vram[index])
 				{
+					vdp_record_vram_write((uint16_t)index, vdp.vram[index]);
 					vdp.vram[index] = data;
 					MARK_BG_DIRTY(vdp.addr);
+					vdp_invalidate_sprite_status_pipeline((uint16_t)index);
 				}
 				vdp.buffer = data;
 			break;
@@ -1029,6 +1547,7 @@ void tms_write(int32_t offset, uint8_t data)
 				index = (vdp.addr & 0x3FFF);
 				if(data != vdp.vram[index])
 				{
+					vdp_record_vram_write((uint16_t)index, vdp.vram[index]);
 					vdp.vram[index] = data;
 					MARK_BG_DIRTY(vdp.addr);
 				}

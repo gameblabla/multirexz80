@@ -17,6 +17,7 @@
 
 extern "C" {
 #include "shared.h"
+#include "input_script.h"
 }
 
 #include <SDL3/SDL.h>
@@ -136,7 +137,8 @@ struct UiSettings
     bool mouse_lightgun = true;
     bool show_lightgun_cursor = true;
     int browser_index = 0;
-    std::filesystem::path browser_dir = std::filesystem::current_path();
+    std::filesystem::path launch_cwd = std::filesystem::current_path();
+    std::filesystem::path browser_dir = launch_cwd;
 };
 
 struct Binding
@@ -367,6 +369,12 @@ struct AppState
     std::FILE *audio_dump_file = nullptr;
     uint32_t audio_dump_bytes = 0;
     int run_seconds = 0;
+    std::string input_playback_path;
+    std::string input_record_path;
+    std::string active_input_record_path;
+    uint32_t input_tap_frames = MULTIREXZ80_INPUT_TAP_FRAMES_DEFAULT;
+    multirexz80_input_script_t *input_playback = nullptr;
+    multirexz80_input_recorder_t *input_recorder = nullptr;
     Uint64 next_frame_ns = 0;
 };
 
@@ -724,7 +732,7 @@ static uint8_t console_option_from_name(const char *name)
     if (!SDL_strcasecmp(name, "psychos") || !SDL_strcasecmp(name, "snkpsychos") || !SDL_strcasecmp(name, "snk")) return 10;
     if (!SDL_strcasecmp(name, "coleco") || !SDL_strcasecmp(name, "colecovision")) return 6;
     if (!SDL_strcasecmp(name, "gg")) return 3;
-    if (!SDL_strcasecmp(name, "ggms")) return 4;
+    if (!SDL_strcasecmp(name, "ggms") || !SDL_strcasecmp(name, "ggsms")) return 4;
     if (!SDL_strcasecmp(name, "sg") || !SDL_strcasecmp(name, "sg1000")) return 5;
     if (!SDL_strcasecmp(name, "sms2")) return 2;
     if (!SDL_strcasecmp(name, "sms")) return 1;
@@ -876,6 +884,14 @@ static std::string sanitize_component(std::string s)
 static bool ensure_state_dir(const std::filesystem::path &dir)
 {
     std::error_code ec;
+
+    /*
+     * An empty parent_path() means "use the current working directory".
+     * std::filesystem::create_directories("") fails on POSIX, which broke
+     * simple relative paths such as --input-record playthrough.input.
+     */
+    if (dir.empty()) return true;
+
     if (std::filesystem::is_directory(dir, ec)) return true;
     return std::filesystem::create_directories(dir, ec) || std::filesystem::is_directory(dir, ec);
 }
@@ -894,6 +910,75 @@ static std::filesystem::path autosave_path(const AppState &app)
     char suffix[64];
     std::snprintf(suffix, sizeof(suffix), "_%08X.auto.png", cart.crc);
     return app.state_dir / (sanitize_component(rp.stem().string()) + suffix);
+}
+
+static std::filesystem::path input_recording_path(const AppState &app)
+{
+    std::filesystem::path rp(app.rom_path.empty() ? "cart" : app.rom_path);
+    char suffix[64];
+    std::snprintf(suffix, sizeof(suffix), "_%08X.input", cart.crc);
+    return app.config_dir / "inputs" / (sanitize_component(rp.stem().string()) + suffix);
+}
+
+static std::filesystem::path resolve_output_path(const AppState &app, const std::filesystem::path &path)
+{
+    if (path.empty()) return path;
+    if (path.is_absolute()) return path.lexically_normal();
+
+    std::filesystem::path base = app.ui.launch_cwd;
+    if (base.empty())
+    {
+        std::error_code ec;
+        base = std::filesystem::current_path(ec);
+        if (ec || base.empty()) return path;
+    }
+    return (base / path).lexically_normal();
+}
+
+static bool start_input_recording(AppState &app, const std::filesystem::path &path)
+{
+    if (app.input_recorder)
+    {
+        app.status = "Input recording is already active: " + app.active_input_record_path;
+        return true;
+    }
+
+    std::filesystem::path resolved = resolve_output_path(app, path);
+    if (!ensure_state_dir(resolved.parent_path()))
+    {
+        app.status = "Could not create input recording directory: " + resolved.parent_path().string();
+        errno = ENOENT;
+        return false;
+    }
+
+    std::string resolved_string = resolved.string();
+
+    /* Create/truncate probe first so failures report the resolved path and so
+     * simple relative names are guaranteed to be created in the launch CWD. */
+    FILE *probe = std::fopen(resolved_string.c_str(), "wb");
+    if (!probe)
+    {
+        app.status = "Could not create input recording: " + resolved_string;
+        return false;
+    }
+    std::fclose(probe);
+
+    if (!multirexz80_input_recorder_open(&app.input_recorder, resolved_string.c_str(), 1))
+    {
+        app.status = "Could not open input recording: " + resolved_string;
+        return false;
+    }
+    app.active_input_record_path = resolved_string;
+    app.status = "Recording input: " + app.active_input_record_path;
+    return true;
+}
+
+static void stop_input_recording(AppState &app)
+{
+    if (!app.input_recorder) return;
+    multirexz80_input_recorder_close(app.input_recorder);
+    app.input_recorder = nullptr;
+    app.status = "Stopped input recording: " + app.active_input_record_path;
 }
 
 #ifndef MULTIREXZ80_RENDER_32BPP
@@ -1345,6 +1430,7 @@ static bool load_game(AppState &app, const std::string &path)
     app.ui.show_menu = false;
     app.menu_hint_until_ns = SDL_GetTicksNS() + MENU_HINT_DURATION_NS;
     app.frame_counter = 0;
+    multirexz80_input_script_reset(app.input_playback);
     app.last_autosave_frame = 0;
     app.arcade_ui_mask = 0;
     app.arcade_ui_mask_next = 0;
@@ -1613,6 +1699,48 @@ static bool handle_action_command(AppState &app, Action action, bool down)
     return false;
 }
 
+static const char *input_action_script_name(Action action)
+{
+    switch (action)
+    {
+        case ACT_UP: return "UP";
+        case ACT_DOWN: return "DOWN";
+        case ACT_LEFT: return "LEFT";
+        case ACT_RIGHT: return "RIGHT";
+        case ACT_A: return "A";
+        case ACT_B: return "B";
+        case ACT_M5_1: return "M5_1";
+        case ACT_M5_2: return "M5_2";
+        case ACT_PAUSE: return "P";
+        default: return nullptr;
+    }
+}
+
+static void sdl3_record_action(AppState &app, Action action, bool down)
+{
+    const char *name = input_action_script_name(action);
+    if (name) multirexz80_input_recorder_write_action(app.input_recorder, app.frame_counter, name, down ? 1 : 0);
+}
+
+static const char *arcade_script_name(uint8_t mask)
+{
+    switch (mask)
+    {
+        case INPUT_ARCADE_COIN1: return "COIN1";
+        case INPUT_ARCADE_COIN2: return "COIN2";
+        case INPUT_ARCADE_SERVICE: return "SERVICE";
+        case INPUT_ARCADE_TEST: return "TEST";
+        case INPUT_ARCADE_START1: return "START1";
+        case INPUT_ARCADE_START2: return "START2";
+        default: return nullptr;
+    }
+}
+
+static bool input_playback_active(const AppState &app)
+{
+    return multirexz80_input_script_active(app.input_playback) != 0;
+}
+
 static const char *gamepad_button_name(SDL_GamepadButton button)
 {
     switch (button)
@@ -1653,15 +1781,28 @@ static void handle_gamepad_button(AppState &app, SDL_GamepadButton button, bool 
         return;
     }
 
+    if (!input_playback_active(app) && arcade_machine_active())
+    {
+        for (const ArcadeBinding &binding : g_arcade_bindings)
+        {
+            if (binding.button == button)
+            {
+                const char *name = arcade_script_name(binding.mask);
+                if (name) multirexz80_input_recorder_write_action(app.input_recorder, app.frame_counter, name, down ? 1 : 0);
+            }
+        }
+    }
+
     for (int i = 0; i < ACT_COUNT; i++)
     {
         if (g_bindings[i].button == button)
         {
             Action action = static_cast<Action>(i);
+            if (!input_playback_active(app)) sdl3_record_action(app, action, down);
             if (handle_action_command(app, action, down)) continue;
             if (i == ACT_MENU && down) app.ui.show_menu = !app.ui.show_menu;
             else if (i == ACT_VKBD && down) app.ui.show_keyboard = !app.ui.show_keyboard;
-            else apply_action(action, down);
+            else if (!input_playback_active(app)) apply_action(action, down);
         }
     }
 }
@@ -1706,6 +1847,9 @@ static void parse_args(AppState &app, int argc, char **argv)
         else if (!std::strcmp(a, "--audio-headroom-db")) { if (const char *v = need(a)) option.audio_headroom_db = std::clamp(std::atoi(v), 0, 9); }
         else if (!std::strcmp(a, "--audio-dump-wav")) { if (const char *v = need(a)) app.audio_dump_path = v; }
         else if (!std::strcmp(a, "--run-seconds")) { if (const char *v = need(a)) app.run_seconds = std::max(1, std::atoi(v)); }
+        else if (!std::strcmp(a, "--input-playback")) { if (const char *v = need(a)) app.input_playback_path = v; }
+        else if (!std::strcmp(a, "--input-record")) { if (const char *v = need(a)) app.input_record_path = v; }
+        else if (!std::strcmp(a, "--input-tap-frames")) { if (const char *v = need(a)) app.input_tap_frames = static_cast<uint32_t>(std::max(1, std::atoi(v))); }
         else if (!std::strcmp(a, "--no-audio-dc-blocker")) option.audio_dc_blocker = 0;
         else if (!std::strcmp(a, "--no-audio-limiter")) option.audio_limiter = 0;
         else if (!std::strcmp(a, "--no-audio-drop")) app.audio_drop_stale = false;
@@ -2201,6 +2345,23 @@ static void draw_menu(AppState &app)
                 }
                 ImGui::Text("Current arcade mask: 0x%02X", input.arcade);
             }
+            ImGui::Separator();
+            ImGui::TextUnformatted("Input scripts");
+            if (input_playback_active(app))
+                ImGui::Text("Playback: %s (%u events)", app.input_playback_path.c_str(), multirexz80_input_script_event_count(app.input_playback));
+            else
+                ImGui::TextUnformatted("Playback: inactive");
+            if (app.input_recorder)
+            {
+                ImGui::Text("Recording: %s", app.active_input_record_path.c_str());
+                if (ImGui::Button("Stop input recording")) stop_input_recording(app);
+            }
+            else
+            {
+                if (ImGui::Button("Start input recording"))
+                    start_input_recording(app, input_recording_path(app));
+                ImGui::Text("Default path: %s", input_recording_path(app).string().c_str());
+            }
             if (sms.console == CONSOLE_SORDM5)
                 ImGui::Checkbox("Sord M5 virtual keyboard", &app.ui.show_keyboard);
             ImGui::EndTabItem();
@@ -2274,16 +2435,34 @@ static void handle_event(AppState &app, const SDL_Event &e)
             for (int i = 0; i < ACT_COUNT; i++)
             {
                 if (g_bindings[i].scan == e.key.scancode)
+                {
+                    if (!input_playback_active(app) && !e.key.repeat)
+                        sdl3_record_action(app, static_cast<Action>(i), down);
                     handle_action_command(app, static_cast<Action>(i), down);
+                }
+            }
+            if (!input_playback_active(app) && !e.key.repeat)
+            {
+                for (const ArcadeBinding &binding : g_arcade_bindings)
+                {
+                    if (binding.scan == e.key.scancode)
+                    {
+                        const char *name = arcade_script_name(binding.mask);
+                        if (name) multirexz80_input_recorder_write_action(app.input_recorder, app.frame_counter, name, down ? 1 : 0);
+                    }
+                }
             }
             if (e.key.key == SDLK_ESCAPE && down) app.ui.show_menu = !app.ui.show_menu;
             if (e.key.key == SDLK_TAB && down) app.ui.show_keyboard = !app.ui.show_keyboard;
-            m5_key_from_sdl(e.key.key, e.key.scancode, down);
-            if (e.key.key == SDLK_ESCAPE) input.m5_reset = down ? SORDM5_KEY_RESET : 0;
+            if (!input_playback_active(app))
+            {
+                m5_key_from_sdl(e.key.key, e.key.scancode, down);
+                if (e.key.key == SDLK_ESCAPE) input.m5_reset = down ? SORDM5_KEY_RESET : 0;
+            }
             break;
         }
         case SDL_EVENT_TEXT_INPUT:
-            m5_key_from_text(e.text.text);
+            if (!input_playback_active(app)) m5_key_from_text(e.text.text);
             break;
 #if defined(SDL_EVENT_FINGER_DOWN) && defined(SDL_EVENT_FINGER_MOTION) && defined(SDL_EVENT_FINGER_UP)
         case SDL_EVENT_FINGER_DOWN:
@@ -2393,6 +2572,10 @@ static void init_imgui(AppState &app)
 static void shutdown_app(AppState &app)
 {
     sdl3_audio_dump_close(app);
+    multirexz80_input_recorder_close(app.input_recorder);
+    app.input_recorder = nullptr;
+    multirexz80_input_script_free(app.input_playback);
+    app.input_playback = nullptr;
     save_sdl3_config(app);
     if (app.rom_loaded) system_poweroff();
     system_shutdown();
@@ -2435,6 +2618,18 @@ int main(int argc, char **argv)
     else app.status = "Drop a ROM, pass one on the command line, or choose it from the browser.";
     if (!sdl3_audio_dump_open(app))
         return 1;
+    if (!app.input_playback_path.empty() &&
+        !multirexz80_input_script_load(&app.input_playback, app.input_playback_path.c_str(), app.input_tap_frames))
+    {
+        std::fprintf(stderr, "Unable to load input playback script '%s': %s\n", app.input_playback_path.c_str(), std::strerror(errno));
+        return 1;
+    }
+    if (!app.input_record_path.empty() && !start_input_recording(app, app.input_record_path))
+    {
+        std::fprintf(stderr, "Unable to open input recording '%s': %s\n%s\n",
+                     app.input_record_path.c_str(), std::strerror(errno), app.status.c_str());
+        return 1;
+    }
 
     while (app.running)
     {
@@ -2446,11 +2641,14 @@ int main(int argc, char **argv)
         SDL_Event e;
         while (SDL_PollEvent(&e)) handle_event(app, e);
         SDL_UpdateGamepads();
-        update_keyboard_state_from_bindings();
-        update_coleco_keypad_from_inputs(app);
-        update_virtual_keyboard_gamepad(app);
-        update_lightgun_mouse(app);
-        update_arcade_state_from_inputs(app);
+        if (!input_playback_active(app))
+        {
+            update_keyboard_state_from_bindings();
+            update_coleco_keypad_from_inputs(app);
+            update_virtual_keyboard_gamepad(app);
+            update_lightgun_mouse(app);
+            update_arcade_state_from_inputs(app);
+        }
 
         if (app.rom_loaded && !app.paused)
         {
@@ -2461,6 +2659,7 @@ int main(int argc, char **argv)
             else
             {
                 run_rewind(app); /* clears one-shot rewind state after release */
+                multirexz80_input_script_apply_frame(app.input_playback, app.frame_counter, &input);
                 system_frame(0);
                 app.frame_counter++;
                 for (size_t i = 0; i < SORDM5_KEY_ROWS; i++)

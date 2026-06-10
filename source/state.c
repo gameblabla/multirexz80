@@ -172,6 +172,10 @@ void system_load_state(FILE* fd)
 
     /** restore video & audio settings (needed if timing changed) ***/
     vdp_init();
+    if (((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) && vdp.cram_top_valid)
+    {
+        vdp.hscroll_top_next_armed |= 0x80;
+    }
     MULTIREXZ80_sound_init();
 
     fread(cart.fcr, 4, sizeof(int8_t), fd);

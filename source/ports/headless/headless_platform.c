@@ -17,24 +17,18 @@
 
 #include "shared.h"
 #include "headless_platform.h"
+#include "input_script.h"
 
 
-typedef struct playback_event
-{
-    uint64_t frame;
-    input_t input;
-} playback_event_t;
 
 struct multirexz80_headless_platform
 {
     multirexz80_headless_platform_options_t opt;
-    FILE *input_record;
+    multirexz80_input_recorder_t *input_record;
     FILE *audio_wav;
     FILE *trace;
     FILE *video_y4m;
-    playback_event_t *playback;
-    size_t playback_count;
-    size_t playback_index;
+    multirexz80_input_script_t *input_playback;
     uint64_t audio_bytes;
     uint32_t video_w;
     uint32_t video_h;
@@ -216,94 +210,7 @@ static int y4m_write_frame(multirexz80_headless_platform_t *p)
     return 1;
 }
 
-static int parse_u64(const char *s, uint64_t *out)
-{
-    char *end = NULL;
-    errno = 0;
-    unsigned long long v = strtoull(s, &end, 0);
-    if (errno || end == s) return 0;
-    *out = (uint64_t)v;
-    return 1;
-}
 
-static int parse_i32(const char *s, int32_t *out)
-{
-    char *end = NULL;
-    errno = 0;
-    long v = strtol(s, &end, 0);
-    if (errno || end == s) return 0;
-    *out = (int32_t)v;
-    return 1;
-}
-
-static int playback_load(multirexz80_headless_platform_t *p)
-{
-    if (!p->opt.input_playback_path) return 1;
-    FILE *fp = fopen(p->opt.input_playback_path, "rb");
-    if (!fp) return 0;
-
-    char line[512];
-    size_t cap = 0;
-    while (fgets(line, sizeof(line), fp))
-    {
-        char *tok[17];
-        size_t ntok = 0;
-        char *save = NULL;
-        char *s = strtok_r(line, " \t\r\n,", &save);
-        if (!s || s[0] == '#') continue;
-        if (strcmp(s, "frame") == 0) continue;
-        while (s && ntok < 17)
-        {
-            tok[ntok++] = s;
-            s = strtok_r(NULL, " \t\r\n,", &save);
-        }
-        if (ntok < 4) continue;
-
-        if (p->playback_count == cap)
-        {
-            cap = cap ? cap * 2 : 256;
-            playback_event_t *next = realloc(p->playback, cap * sizeof(*next));
-            if (!next)
-            {
-                fclose(fp);
-                return 0;
-            }
-            p->playback = next;
-        }
-
-        playback_event_t *ev = &p->playback[p->playback_count];
-        memset(ev, 0, sizeof(*ev));
-        uint64_t frame = 0, pad0 = 0, pad1 = 0, system = 0;
-        uint64_t m5row[SORDM5_KEY_ROWS] = {0, 0, 0, 0, 0, 0, 0};
-        uint64_t m5reset = 0;
-        uint64_t arcade = 0;
-        int32_t analog[4] = {0, 0, 0, 0};
-        if (!parse_u64(tok[0], &frame) || !parse_u64(tok[1], &pad0) ||
-            !parse_u64(tok[2], &pad1) || !parse_u64(tok[3], &system))
-            continue;
-        for (size_t i = 4; i < ntok && i < 8; i++)
-            parse_i32(tok[i], &analog[i - 4]);
-        for (size_t i = 8; i < ntok && i < 15; i++)
-            parse_u64(tok[i], &m5row[i - 8]);
-        if (ntok > 15) parse_u64(tok[15], &m5reset);
-        if (ntok > 16) parse_u64(tok[16], &arcade);
-        ev->frame = frame;
-        ev->input.pad[0] = (uint8_t)pad0;
-        ev->input.pad[1] = (uint8_t)pad1;
-        ev->input.system = (uint8_t)system;
-        ev->input.arcade = (uint8_t)arcade;
-        ev->input.analog[0][0] = analog[0];
-        ev->input.analog[0][1] = analog[1];
-        ev->input.analog[1][0] = analog[2];
-        ev->input.analog[1][1] = analog[3];
-        for (size_t i = 0; i < SORDM5_KEY_ROWS; i++) ev->input.m5_key[i] = (uint8_t)m5row[i];
-        ev->input.m5_reset = (uint8_t)m5reset;
-        p->playback_count++;
-    }
-
-    fclose(fp);
-    return 1;
-}
 
 static int dump_state(const char *prefix)
 {
@@ -380,11 +287,13 @@ int multirexz80_headless_platform_create(multirexz80_headless_platform_t **out,
 
     if (p->opt.input_record_path)
     {
-        p->input_record = fopen(p->opt.input_record_path, "wb");
-        if (!p->input_record) goto fail;
-        fprintf(p->input_record, "frame pad0 pad1 system analog00 analog01 analog10 analog11 m5y0 m5y1 m5y2 m5y3 m5y4 m5y5 m5y6 m5reset arcade\n");
+        if (!multirexz80_input_recorder_open(&p->input_record, p->opt.input_record_path, 1)) goto fail;
     }
-    if (!playback_load(p)) goto fail;
+    if (p->opt.input_playback_path)
+    {
+        uint32_t tap_frames = p->opt.input_tap_frames ? p->opt.input_tap_frames : MULTIREXZ80_INPUT_TAP_FRAMES_DEFAULT;
+        if (!multirexz80_input_script_load(&p->input_playback, p->opt.input_playback_path, tap_frames)) goto fail;
+    }
     if (!wav_open(p)) goto fail;
     if (p->opt.trace_path)
     {
@@ -406,10 +315,10 @@ void multirexz80_headless_platform_destroy(multirexz80_headless_platform_t *p)
 {
     if (!p) return;
     wav_close(p);
-    if (p->input_record) fclose(p->input_record);
+    multirexz80_input_recorder_close(p->input_record);
     if (p->trace) fclose(p->trace);
     if (p->video_y4m) fclose(p->video_y4m);
-    free(p->playback);
+    multirexz80_input_script_free(p->input_playback);
     free(p);
 }
 
@@ -417,11 +326,7 @@ int multirexz80_headless_platform_begin_frame(multirexz80_headless_platform_t *p
 {
     MULTIREXZ80_TRACE_SET_FRAME(frame);
     if (!p) return 1;
-    while (p->playback_index < p->playback_count && p->playback[p->playback_index].frame <= frame)
-    {
-        input = p->playback[p->playback_index].input;
-        p->playback_index++;
-    }
+    multirexz80_input_script_apply_frame(p->input_playback, frame, &input);
     return 1;
 }
 
@@ -430,14 +335,7 @@ int multirexz80_headless_platform_end_frame(multirexz80_headless_platform_t *p, 
     MULTIREXZ80_TRACE_CPU_FRAME(frame);
     if (!p) return 1;
 
-    if (p->input_record)
-    {
-        fprintf(p->input_record, "%llu 0x%02X 0x%02X 0x%02X %d %d %d %d 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
-                (unsigned long long)frame, input.pad[0], input.pad[1], input.system,
-                input.analog[0][0], input.analog[0][1], input.analog[1][0], input.analog[1][1],
-                input.m5_key[0], input.m5_key[1], input.m5_key[2], input.m5_key[3],
-                input.m5_key[4], input.m5_key[5], input.m5_key[6], input.m5_reset, input.arcade);
-    }
+    multirexz80_input_recorder_write_state_changes(p->input_record, frame, &input);
 
     if (p->audio_wav && snd.output && snd.sample_count > 0)
     {

@@ -12,6 +12,8 @@ PSG_ENGINE := $(SOUND_ENGINE)
 endif
 # Possible choices : z80 (accurate but proprietary), eighty (EightyZ80's core, GPLv2)
 Z80_CORE = z80
+SCALE2X_UPSCALER = 1
+PROFILE_DIR ?= .
 PROFILE = 0
 ZIP_SUPPORT = 1
 STATIC_MEMORY ?= 0
@@ -22,7 +24,7 @@ ENABLE_SORDM5 ?= 1
 FEATURE_DEFS := -DMULTIREXZ80_ENABLE_ARCADE=$(ENABLE_ARCADE) -DMULTIREXZ80_ENABLE_COLECO=$(ENABLE_COLECO) -DMULTIREXZ80_ENABLE_SORDM5=$(ENABLE_SORDM5)
 
 SRCDIR = ./source ./source/other/eeprom/93c46 ./source/other/decode ./source/video/sms_vdp ./source/video/tms9918 ./source/sound/mixer ./source/sound/opll ./source/sound/opl1 ./source/cpu_cores/$(Z80_CORE) ./source/unzip
-SRCDIR += ./source/ports/$(PORT) ./source/ports/sdl12_common ./source/sound/psg/$(PSG_ENGINE) ./source/sound_output/$(SOUND_OUTPUT)
+SRCDIR += ./source/scalers ./source/ports/$(PORT) ./source/ports/sdl12_common ./source/sound/psg/$(PSG_ENGINE) ./source/sound_output/$(SOUND_OUTPUT)
 
 ifeq ($(ENABLE_COLECO),1)
 SRCDIR += ./source/platform/coleco
@@ -43,9 +45,10 @@ OBJ_CP		= $(notdir $(patsubst %.cpp, %.o, $(SRC_CP)))
 OBJS		= $(OBJ_C) $(OBJ_CP)
 
 CFLAGS		= -Ofast -fdata-sections -ffunction-sections -mplt -mno-shared -mframe-header-opt -fno-common -march=mips32 -mtune=mips32 -flto=auto
+CFLAGS		+= -mbranch-likely -mbranch-cost=2
 CFLAGS		+= -falign-functions=4 -falign-jumps=4 -falign-loops=4 -falign-labels=4 -fsingle-precision-constant 
 CFLAGS		+= -mno-fp-exceptions -mno-check-zero-division -fno-common -fno-short-enums -ffinite-math-only -funsafe-math-optimizations -fsection-anchors -fgcse-las -fgcse-sm
-CFLAGS		+= -DALIGN_DWORD -DNOBLANKING_LEFTCOLUM -DNONBLOCKING_AUDIO
+CFLAGS		+= -DALIGN_DWORD -DNOBLANKING_LEFTCOLUM -DNONBLOCKING_AUDIO -DMULTIREXZ80_SCALE2X_TARGET_NATIVE
 CFLAGS		+= $(FEATURE_DEFS) -DLSB_FIRST
 CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/scalers -Isource/ports/$(PORT) -Isource/ports/sdl12_common -Isource/unzip -Isource/sdl -Isource/sound_output
 
@@ -53,13 +56,9 @@ SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate="/usr/local/home"
-LDFLAGS		= -lgcov
+CFLAGS 		+= -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE), APPLY)
-CFLAGS		+= -fprofile-use
-LDFLAGS     = -nodefaultlibs
-else
-LDFLAGS     = -nodefaultlibs 
+CFLAGS		+= -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
 endif
 
 ifeq ($(PSG_ENGINE), mame_sn76489)

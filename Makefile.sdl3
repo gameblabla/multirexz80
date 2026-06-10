@@ -8,6 +8,8 @@ endif
 Z80_CORE     ?= z80
 RENDER_BPP   ?= 32
 ZIP_SUPPORT ?= 1
+PROFILE ?= 0
+PROFILE_DIR ?= .
 STATIC_MEMORY ?= 0
 STATIC_MEMORY_BYTES ?= 16777216
 ENABLE_ARCADE ?= 1
@@ -75,10 +77,16 @@ SDL3_LIBS   := $(shell pkg-config --libs sdl3 2>/dev/null)
 COMMON_DEFS  = -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_SDL3 $(ZIP_DEFS) $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS) $(STATIC_DEFS)
 COMMON_INC = -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/sdl3 -Isource/sound_output -Isource/unzip
 IMGUI_INC    = -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
-CFLAGS       = -O2 -g -Wall -Wextra -std=gnu99 $(COMMON_DEFS) $(COMMON_INC) $(SDL3_CFLAGS)
-CXXFLAGS     = -O2 -g -Wall -Wextra -std=c++17 $(COMMON_DEFS) $(COMMON_INC) $(IMGUI_INC) $(SDL3_CFLAGS)
+PROFILE_CFLAGS :=
+ifeq ($(PROFILE),YES)
+PROFILE_CFLAGS += -fprofile-generate=$(PROFILE_DIR)
+else ifeq ($(PROFILE),APPLY)
+PROFILE_CFLAGS += -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
+endif
+CFLAGS       = -O2 -g -Wall -Wextra -std=gnu99 $(COMMON_DEFS) $(COMMON_INC) $(SDL3_CFLAGS) $(PROFILE_CFLAGS)
+CXXFLAGS     = -O2 -g -Wall -Wextra -std=c++17 $(COMMON_DEFS) $(COMMON_INC) $(IMGUI_INC) $(SDL3_CFLAGS) $(PROFILE_CFLAGS)
 OPL_CFLAGS   = -Ofast -fomit-frame-pointer -fno-stack-protector -DNDEBUG
-LDFLAGS      = -lm $(SDL3_LIBS)
+LDFLAGS      = -lm $(SDL3_LIBS) $(PROFILE_CFLAGS)
 
 $(PRGNAME): check-imgui $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LDFLAGS)
@@ -87,6 +95,11 @@ check-imgui:
 	@test -f $(IMGUI_DIR)/imgui.cpp || (echo "Dear ImGui not found. Clone or copy it to $(IMGUI_DIR), or pass IMGUI_DIR=/path/to/imgui"; exit 1)
 
 opl.o mame_fmopl.o mame_ymdeltat.o crab_ym2413.o: CFLAGS += $(OPL_CFLAGS)
+
+
+# Force object rebuilds when this makefile changes.  This prevents stale .o/.opp
+# files from an older checkout from being linked after a source-only overlay.
+$(OBJS): Makefile.sdl3
 
 $(OBJS_C): %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<

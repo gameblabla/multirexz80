@@ -42,34 +42,68 @@
 /* No license ? Scale2x was licensed under the GPLv2 and this code was found among in GPLv2 licensed code.
  * I had to make some minor modifications to it and the code is fairly small but i think we should be good. */
 
+#define SCALE2X_PIXEL(E, B, D, F, H, OUT0, OUT1, OUT2, OUT3) \
+	do { \
+		(OUT0) = ((D) == (B) && (B) != (F) && (D) != (H)) ? (D) : (E); \
+		(OUT1) = ((B) == (F) && (B) != (D) && (F) != (H)) ? (F) : (E); \
+		(OUT2) = ((D) == (H) && (D) != (B) && (H) != (F)) ? (D) : (E); \
+		(OUT3) = ((H) == (F) && (D) != (H) && (B) != (F)) ? (F) : (E); \
+	} while (0)
+
 void scale2x(uint16_t* restrict srcpixels, uint16_t* restrict dstpixels, const uint32_t srcpitch, const uint32_t dstpitch, const uint32_t width, uint32_t height)
 {
-	uint32_t nextlineSrc = srcpitch / sizeof(uint16_t);
-	uint16_t* restrict p = (uint16_t* restrict)srcpixels;
+	const uint32_t src_stride = srcpitch / sizeof(uint16_t);
+	const uint32_t dst_stride = dstpitch / sizeof(uint16_t);
+	uint32_t x, y;
 
-	uint32_t nextlineDst = dstpitch / sizeof(uint16_t);
-	uint16_t* restrict q = (uint16_t* restrict)dstpixels;
-	
-	uint32_t i, j;
-	uint16_t B, D, E, F, H;
-	
-	while(height--) 
+	if (!srcpixels || !dstpixels || width == 0 || height == 0 || src_stride == 0 || dst_stride == 0)
+		return;
+
+	for (y = 0; y < height; y++)
 	{
-		j = 0;
-		for(i = 0; i < width; ++i, j += 2) {
-			B = *(p + i - nextlineSrc);
-			D = *(p + i - 1);
-			E = *(p + i);
-			F = *(p + i + 1);
-			H = *(p + i + nextlineSrc);
+		const uint16_t *row_above = srcpixels + ((y == 0) ? 0 : (y - 1)) * src_stride;
+		const uint16_t *row = srcpixels + y * src_stride;
+		const uint16_t *row_below = srcpixels + ((y + 1 < height) ? (y + 1) : y) * src_stride;
+		uint16_t *dst0 = dstpixels + (y * 2) * dst_stride;
+		uint16_t *dst1 = dst0 + dst_stride;
 
-			*(q + j) = (uint16_t)(D == B && B != F && D != H ? D : E);
-			*(q + j + 1) = (uint16_t)(B == F && B != D && F != H ? F : E);
-			*(q + j + nextlineDst) = (uint16_t)(D == H && D != B && H != F ? D : E);
-			*(q + j + nextlineDst + 1) = (uint16_t)(H == F && D != H && B != F ? F : E);
+		for (x = 0; x < width; x++)
+		{
+			const uint16_t B = row_above[x];
+			const uint16_t D = row[(x == 0) ? 0 : (x - 1)];
+			const uint16_t E = row[x];
+			const uint16_t F = row[(x + 1 < width) ? (x + 1) : x];
+			const uint16_t H = row_below[x];
+			SCALE2X_PIXEL(E, B, D, F, H, dst0[x * 2], dst0[x * 2 + 1], dst1[x * 2], dst1[x * 2 + 1]);
 		}
-		p += nextlineSrc;
-		q += nextlineDst << 1;
 	}
+}
 
+void scale2x32(uint32_t* restrict srcpixels, uint32_t* restrict dstpixels, const uint32_t srcpitch, const uint32_t dstpitch, const uint32_t width, uint32_t height)
+{
+	const uint32_t src_stride = srcpitch / sizeof(uint32_t);
+	const uint32_t dst_stride = dstpitch / sizeof(uint32_t);
+	uint32_t x, y;
+
+	if (!srcpixels || !dstpixels || width == 0 || height == 0 || src_stride == 0 || dst_stride == 0)
+		return;
+
+	for (y = 0; y < height; y++)
+	{
+		const uint32_t *row_above = srcpixels + ((y == 0) ? 0 : (y - 1)) * src_stride;
+		const uint32_t *row = srcpixels + y * src_stride;
+		const uint32_t *row_below = srcpixels + ((y + 1 < height) ? (y + 1) : y) * src_stride;
+		uint32_t *dst0 = dstpixels + (y * 2) * dst_stride;
+		uint32_t *dst1 = dst0 + dst_stride;
+
+		for (x = 0; x < width; x++)
+		{
+			const uint32_t B = row_above[x];
+			const uint32_t D = row[(x == 0) ? 0 : (x - 1)];
+			const uint32_t E = row[x];
+			const uint32_t F = row[(x + 1 < width) ? (x + 1) : x];
+			const uint32_t H = row_below[x];
+			SCALE2X_PIXEL(E, B, D, F, H, dst0[x * 2], dst0[x * 2 + 1], dst1[x * 2], dst1[x * 2 + 1]);
+		}
+	}
 }

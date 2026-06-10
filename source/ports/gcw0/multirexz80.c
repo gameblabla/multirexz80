@@ -67,12 +67,14 @@ static int width_remember = 256;
 static int width_remove = 0;
 static int remember_res_height;
 
-static int scale2x_res = 1;
 static uint_fast8_t forcerefresh = 0;
+static uint_fast8_t video_clear_pending = 1;
 static uint_fast8_t dpad_input[4] = {0, 0, 0, 0};
 uint_fast16_t pixels_shifting_remove = 0;
+static uint8_t virtual_keyboard_requested = 0;
 
 int update_window_size(int w, int h);
+static void Virtual_Keyboard(void);
 
 static void Clear_video()
 {
@@ -91,6 +93,11 @@ static void video_update()
 	SDL_Rect src, dst;
 	multirexz80_sdl12_view_t view;
 	int target_w, target_h;
+	static int last_mode = -1;
+	static int last_src_x = -1;
+	static int last_src_y = -1;
+	static int last_src_w = -1;
+	static int last_src_h = -1;
 	int locked = 0;
 	int screen_pitch;
 
@@ -98,17 +105,18 @@ static void video_update()
 	width_hold = view.w;
 	width_remove = view.x;
 
-	if (option.fullscreen == 2) scale2x_res = 2;
-	else scale2x_res = 1;
-
-	target_w = (option.fullscreen == 0) ? view.w * scale2x_res : HOST_WIDTH_RESOLUTION;
-	target_h = (option.fullscreen == 0) ? view.h * scale2x_res : HOST_HEIGHT_RESOLUTION;
+	/* On GCW0/OpenDingux, requesting a source-sized SDL mode is the
+	 * hardware/IPU scaling path.  Native output must keep a 320x240 scanout
+	 * and blit the source rectangle 1:1 in the centre. */
+	target_w = (option.fullscreen == 1) ? view.w : HOST_WIDTH_RESOLUTION;
+	target_h = (option.fullscreen == 1) ? view.h : HOST_HEIGHT_RESOLUTION;
 	if (remember_res_height != target_h || width_remember != target_w || forcerefresh == 1)
 	{
 		remember_res_height = target_h;
 		width_remember = target_w;
 		if (update_window_size(target_w, target_h))
 			return;
+		video_clear_pending = 1;
 		forcerefresh = 0;
 	}
 
@@ -116,44 +124,64 @@ static void video_update()
 	src.y = (Sint16)view.y;
 	src.w = (Uint16)view.w;
 	src.h = (Uint16)view.h;
-	SDL_FillRect(sdl_screen, NULL, 0);
-
-	switch(option.fullscreen) 
+	if (last_mode != option.fullscreen || last_src_x != src.x || last_src_y != src.y ||
+	    last_src_w != src.w || last_src_h != src.h)
 	{
-		/* Native */
-        case 0: 
+		video_clear_pending = 1;
+		last_mode = option.fullscreen;
+		last_src_x = src.x;
+		last_src_y = src.y;
+		last_src_w = src.w;
+		last_src_h = src.h;
+	}
+
+	switch(option.fullscreen)
+	{
+		/* Native 1:1 inside the fixed 320x240 scanout. */
+		case 0:
+			if (video_clear_pending)
+			{
+				SDL_FillRect(sdl_screen, NULL, 0);
+				video_clear_pending = 0;
+			}
 			dst.x = (Sint16)((sdl_screen->w - src.w) / 2);
 			dst.y = (Sint16)((sdl_screen->h - src.h) / 2);
 			if (dst.x < 0) dst.x = 0;
 			if (dst.y < 0) dst.y = 0;
 			SDL_BlitSurface(sms_bitmap, &src, sdl_screen, &dst);
 			break;
-        case 1:
-			multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w, view.h);
-			if (SDL_MUSTLOCK(sdl_screen))
-			{
-				if (SDL_LockSurface(sdl_screen) < 0)
-					break;
-				locked = 1;
-			}
-			screen_pitch = multirexz80_sdl12_surface_pitch_pixels(sdl_screen);
-			if (screen_pitch <= 0) screen_pitch = sdl_screen->w;
-			bitmap_scale(view.x, view.y, view.w, view.h, dst.w, dst.h,
-			             view.pitch_pixels, screen_pitch - dst.w,
-			             (uint16_t * restrict)sms_bitmap->pixels,
-			             (uint16_t * restrict)sdl_screen->pixels + dst.x + dst.y * screen_pitch);
-			if (locked) { SDL_UnlockSurface(sdl_screen); locked = 0; }
+
+		/* Hardware/IPU: source-sized mode, scaled by OpenDingux SDL. */
+		case 1:
+			dst.x = 0;
+			dst.y = 0;
+			SDL_BlitSurface(sms_bitmap, &src, sdl_screen, &dst);
+			video_clear_pending = 0;
 			break;
+
+		/* Software EPX/Scale2x, then fit to the fixed LCD scanout. */
 		case 2:
 #ifdef SCALE2X_UPSCALER
 			if (view.w * 2 <= scale2x_buf->w && view.h * 2 <= scale2x_buf->h)
 			{
+				if (video_clear_pending)
+				{
+					SDL_FillRect(sdl_screen, NULL, 0);
+					video_clear_pending = 0;
+				}
 				scale2x((uint16_t *)sms_bitmap->pixels + view.y * view.pitch_pixels + view.x,
 				        (uint16_t *)scale2x_buf->pixels,
 				        sms_bitmap->pitch,
 				        scale2x_buf->pitch,
 				        view.w, view.h);
+#ifdef MULTIREXZ80_SCALE2X_TARGET_NATIVE
+				dst.x = 0;
+				dst.y = 0;
+				dst.w = (Uint16)sdl_screen->w;
+				dst.h = (Uint16)sdl_screen->h;
+#else
 				multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w * 2, view.h * 2);
+#endif
 				if (SDL_MUSTLOCK(sdl_screen))
 				{
 					if (SDL_LockSurface(sdl_screen) < 0)
@@ -332,6 +360,28 @@ static const char* Return_Text_Button(uint32_t button)
 		/* Start */
 		case SDLK_RETURN:
 			return "Start button";
+		case SDLK_0:
+			return "0 key";
+		case SDLK_1:
+			return "1 key";
+		case SDLK_2:
+			return "2 key";
+		case SDLK_3:
+			return "3 key";
+		case SDLK_4:
+			return "4 key";
+		case SDLK_5:
+			return "5 key";
+		case SDLK_6:
+			return "6 key";
+		case SDLK_7:
+			return "7 key";
+		case SDLK_8:
+			return "8 key";
+		case SDLK_9:
+			return "9 key";
+		case SDLK_F2:
+			return "F2 key";
 		/* Select */
 		case SDLK_ESCAPE:
 			return "Select button";
@@ -362,12 +412,62 @@ static const char* Return_Volume(uint32_t vol)
 	}	
 }
 
-static void Draw_Option(int32_t numb, int32_t selection, const char* drawtext, int32_t x, int32_t y)
+static void Draw_Option(int32_t config_index, int32_t selection, int32_t selection_slot, const char* drawtext, int32_t x, int32_t y)
 {
-	char text[18];
-	snprintf(text, sizeof(text), drawtext, Return_Text_Button(option.config_buttons[numb]));
-	if (selection == numb+1) print_string(text, TextRed, 0, x, y+2, (uint16_t*)backbuffer->pixels);
+	char text[28];
+	snprintf(text, sizeof(text), drawtext, Return_Text_Button(option.config_buttons[config_index]));
+	if (selection == selection_slot) print_string(text, TextRed, 0, x, y+2, (uint16_t*)backbuffer->pixels);
 	else print_string(text, TextWhite, 0, x, y+2, (uint16_t*)backbuffer->pixels);
+}
+
+static int32_t Remap_Option_Count(void)
+{
+	int32_t count = 7;
+	if (sms.console == CONSOLE_COLECO) count += 11;
+	else if (multirexz80_sdl12_arcade_active()) count += 6;
+	if (multirexz80_sdl12_keyboard_active()) count += 1;
+	return count;
+}
+
+static int32_t Remap_Config_Index(int32_t selection)
+{
+	static const int32_t base_indices[] = {
+		CONFIG_BUTTON_UP, CONFIG_BUTTON_DOWN, CONFIG_BUTTON_LEFT, CONFIG_BUTTON_RIGHT,
+		CONFIG_BUTTON_BUTTON1, CONFIG_BUTTON_BUTTON2, CONFIG_BUTTON_START
+	};
+	static const int32_t coleco_indices[] = {
+		CONFIG_BUTTON_DOLLARS, CONFIG_BUTTON_ASTERISK, CONFIG_BUTTON_ONE, CONFIG_BUTTON_TWO,
+		CONFIG_BUTTON_THREE, CONFIG_BUTTON_FOUR, CONFIG_BUTTON_FIVE, CONFIG_BUTTON_SIX,
+		CONFIG_BUTTON_SEVEN, CONFIG_BUTTON_EIGHT, CONFIG_BUTTON_NINE
+	};
+	static const int32_t arcade_indices[] = {
+		CONFIG_BUTTON_ARCADE_COIN1, CONFIG_BUTTON_ARCADE_COIN2,
+		CONFIG_BUTTON_ARCADE_START1, CONFIG_BUTTON_ARCADE_START2,
+		CONFIG_BUTTON_ARCADE_SERVICE, CONFIG_BUTTON_ARCADE_TEST
+	};
+	selection--;
+	if (selection < 0) return -1;
+	if (selection < 7) return base_indices[selection];
+	selection -= 7;
+	if (sms.console == CONSOLE_COLECO)
+	{
+		if (selection < 11) return coleco_indices[selection];
+		selection -= 11;
+	}
+	else if (multirexz80_sdl12_arcade_active())
+	{
+		if (selection < 6) return arcade_indices[selection];
+		selection -= 6;
+	}
+	if (multirexz80_sdl12_keyboard_active() && selection == 0) return CONFIG_BUTTON_VKBD;
+	return -1;
+}
+
+static int32_t Draw_Remap_Option(int32_t slot, const char *text, int32_t currentselection, int32_t x, int32_t y)
+{
+	int32_t config_index = Remap_Config_Index(slot);
+	if (config_index >= 0) Draw_Option(config_index, currentselection, slot, text, x, y);
+	return slot + 1;
 }
 
 static void Input_Remapping()
@@ -383,61 +483,44 @@ static void Input_Remapping()
 		pressed = 0;
 		SDL_FillRect( backbuffer, NULL, 0 );
 		
-        while (SDL_PollEvent(&Event))
-        {
-            if (Event.type == SDL_KEYDOWN)
-            {
-                switch(Event.key.keysym.sym)
-                {
-                    case SDLK_UP:
-                        currentselection--;
-                        if (currentselection < 1)
-                        {
-							if (sms.console == CONSOLE_COLECO)
-							{
-								currentselection = 18;
-							}
-							else currentselection = 7;
-						}
-                        break;
-                    case SDLK_DOWN:
-                        currentselection++;
-                        if (currentselection == 19 && sms.console == CONSOLE_COLECO)
-                        {
-							currentselection = 1;
-						}
-                        else if (currentselection == 8 && sms.console != CONSOLE_COLECO)
-                        {
-							currentselection = 1;
-						}
-                        break;
-                    case SDLK_LCTRL:
-                    case SDLK_RETURN:
-                        pressed = 1;
-					break;
-                    case SDLK_LALT:
-                        exit_input = 1;
-					break;
-                    case SDLK_LEFT:
-						if (sms.console == CONSOLE_COLECO)
-						{
-							if (currentselection > 8) currentselection -= 9;
-						}
-					break;
-                    case SDLK_RIGHT:
-						if (sms.console == CONSOLE_COLECO)
-						{
-							if (currentselection < 10) currentselection += 9;
-						}
-					break;
+		while (SDL_PollEvent(&Event))
+		{
+			if (Event.type == SDL_KEYDOWN)
+			{
+				switch(Event.key.keysym.sym)
+				{
+					case SDLK_UP:
+						currentselection--;
+						if (currentselection < 1) currentselection = Remap_Option_Count();
+						break;
+					case SDLK_DOWN:
+						currentselection++;
+						if (currentselection > Remap_Option_Count()) currentselection = 1;
+						break;
+					case SDLK_LCTRL:
+					case SDLK_RETURN:
+						pressed = 1;
+						break;
+					case SDLK_LALT:
+						exit_input = 1;
+						break;
+					case SDLK_LEFT:
+						if (sms.console == CONSOLE_COLECO && currentselection > 8) currentselection -= 9;
+						else if (multirexz80_sdl12_arcade_active() && currentselection > 7) currentselection -= 6;
+						break;
+					case SDLK_RIGHT:
+						if (sms.console == CONSOLE_COLECO && currentselection < 10) currentselection += 9;
+						else if (multirexz80_sdl12_arcade_active() && currentselection < 8) currentselection += 6;
+						if (currentselection > Remap_Option_Count()) currentselection = Remap_Option_Count();
+						break;
 					default:
-					break;
-                }
-            }
-        }
+						break;
+				}
+			}
+		}
 
-        if (pressed)
-        {
+		if (pressed)
+		{
 			SDL_FillRect( backbuffer, NULL, 0 );
 			print_string("Please press button for mapping", TextWhite, TextBlue, 37, 108, backbuffer->pixels);
 			SDL_SoftStretch(backbuffer, NULL, sdl_screen, NULL);
@@ -451,65 +534,184 @@ static void Input_Remapping()
 					{
 						if (Event.key.keysym.sym != SDLK_END && Event.key.keysym.sym != SDLK_HOME && Event.key.keysym.sym != SDLK_RCTRL)
 						{
-							option.config_buttons[currentselection - 1] = Event.key.keysym.sym;
+							int32_t config_index = Remap_Config_Index(currentselection);
+							if (config_index >= 0) option.config_buttons[config_index] = Event.key.keysym.sym;
 							exit_map = 1;
 						}
 					}
 				}
 			}
-        }
+		}
 		
 		print_string("Input remapping", TextWhite, 0, 100, 10, backbuffer->pixels);
-		
 		print_string("Press [A] to map to a button", TextWhite, TextBlue, 50, 210, backbuffer->pixels);
 		print_string("Press [B] to Exit", TextWhite, TextBlue, 85, 225, backbuffer->pixels);
 		
-		Draw_Option(0, currentselection, "  UP  : %s\n", 5, 25);
-		Draw_Option(1, currentselection, " DOWN : %s\n", 5, 45);
-		Draw_Option(2, currentselection, " LEFT : %s\n", 5, 65);
-		Draw_Option(3, currentselection, "RIGHT : %s\n", 5, 85);
-		
-		Draw_Option(4, currentselection, "BTN 1 : %s\n", 5, 105);
-		Draw_Option(5, currentselection, "BTN 2 : %s\n", 5, 125);
-		Draw_Option(6, currentselection, "START : %s\n", 5, 145);
-		
-		if (sms.console == CONSOLE_COLECO)
 		{
-			Draw_Option(7, currentselection, " [*]  : %s\n", 5, 165);
-			Draw_Option(8, currentselection, " [#]  : %s\n", 5, 185);
-			
-			Draw_Option(9, currentselection, " [1]  : %s\n", 165, 25);
-			Draw_Option(10, currentselection, " [2]  : %s\n", 165, 45);
-			
-			Draw_Option(11, currentselection, " [3]  : %s\n", 165, 65);
-			Draw_Option(12, currentselection, " [4]  : %s\n", 165, 85);
-			Draw_Option(13, currentselection, " [5]  : %s\n", 165, 105);
-			Draw_Option(14, currentselection, " [6]  : %s\n", 165, 125);
-			
-			Draw_Option(15, currentselection, " [7]  : %s\n", 165, 145);
-			Draw_Option(16, currentselection, " [8]  : %s\n", 165, 165);
-			Draw_Option(17, currentselection, " [9]  : %s\n", 165, 185);
+			int32_t slot = 1;
+			slot = Draw_Remap_Option(slot, "  UP  : %s\n", currentselection, 5, 25);
+			slot = Draw_Remap_Option(slot, " DOWN : %s\n", currentselection, 5, 45);
+			slot = Draw_Remap_Option(slot, " LEFT : %s\n", currentselection, 5, 65);
+			slot = Draw_Remap_Option(slot, "RIGHT : %s\n", currentselection, 5, 85);
+			slot = Draw_Remap_Option(slot, "BTN 1 : %s\n", currentselection, 5, 105);
+			slot = Draw_Remap_Option(slot, "BTN 2 : %s\n", currentselection, 5, 125);
+			slot = Draw_Remap_Option(slot, "START : %s\n", currentselection, 5, 145);
+
+			if (sms.console == CONSOLE_COLECO)
+			{
+				slot = Draw_Remap_Option(slot, " [*]  : %s\n", currentselection, 5, 165);
+				slot = Draw_Remap_Option(slot, " [#]  : %s\n", currentselection, 5, 185);
+				slot = Draw_Remap_Option(slot, " [1]  : %s\n", currentselection, 165, 25);
+				slot = Draw_Remap_Option(slot, " [2]  : %s\n", currentselection, 165, 45);
+				slot = Draw_Remap_Option(slot, " [3]  : %s\n", currentselection, 165, 65);
+				slot = Draw_Remap_Option(slot, " [4]  : %s\n", currentselection, 165, 85);
+				slot = Draw_Remap_Option(slot, " [5]  : %s\n", currentselection, 165, 105);
+				slot = Draw_Remap_Option(slot, " [6]  : %s\n", currentselection, 165, 125);
+				slot = Draw_Remap_Option(slot, " [7]  : %s\n", currentselection, 165, 145);
+				slot = Draw_Remap_Option(slot, " [8]  : %s\n", currentselection, 165, 165);
+				slot = Draw_Remap_Option(slot, " [9]  : %s\n", currentselection, 165, 185);
+			}
+			else if (multirexz80_sdl12_arcade_active())
+			{
+				slot = Draw_Remap_Option(slot, "COIN1 : %s\n", currentselection, 165, 25);
+				slot = Draw_Remap_Option(slot, "COIN2 : %s\n", currentselection, 165, 45);
+				slot = Draw_Remap_Option(slot, "STRT1 : %s\n", currentselection, 165, 65);
+				slot = Draw_Remap_Option(slot, "STRT2 : %s\n", currentselection, 165, 85);
+				slot = Draw_Remap_Option(slot, "SERV  : %s\n", currentselection, 165, 105);
+				slot = Draw_Remap_Option(slot, "TEST  : %s\n", currentselection, 165, 125);
+			}
+			if (multirexz80_sdl12_keyboard_active())
+				slot = Draw_Remap_Option(slot, "VKBD  : %s\n", currentselection, 165, 185);
 		}
 		SDL_SoftStretch(backbuffer, NULL, sdl_screen, NULL);
 		SDL_Flip(sdl_screen);
 	}
-	
+}
+
+static void Virtual_Keyboard(void)
+{
+	SDL_Event Event;
+	int32_t current = 0;
+	int32_t exit_keyboard = 0;
+	int32_t pressed_index = -1;
+	int32_t cols = 8;
+	int32_t count = multirexz80_sdl12_keyboard_key_count();
+
+	if (!multirexz80_sdl12_keyboard_active() || count <= 0)
+		return;
+
+	update_window_size(HOST_WIDTH_RESOLUTION, HOST_HEIGHT_RESOLUTION);
+	font_drawing_set_target((uint16_t *)backbuffer->pixels, backbuffer->pitch >> 1, backbuffer->w, backbuffer->h);
+
+	while (!exit_keyboard)
+	{
+		int32_t i;
+		SDL_FillRect(backbuffer, NULL, 0);
+		print_string("Sord M5 virtual keyboard", TextWhite, 0, 56, 8, backbuffer->pixels);
+		for (i = 0; i < count; i++)
+		{
+			const multirexz80_sdl12_keyboard_key_t *key = multirexz80_sdl12_keyboard_key(i);
+			char label[16];
+			int32_t x = 4 + (i % cols) * 39;
+			int32_t y = 34 + (i / cols) * 22;
+			if (!key) continue;
+			snprintf(label, sizeof(label), "[%s]", key->label);
+			print_string(label, (i == current) ? TextRed : TextWhite, 0, x, y, backbuffer->pixels);
+		}
+		print_string("D-pad move  A hold key  B exit", TextWhite, TextBlue, 28, 218, backbuffer->pixels);
+		SDL_SoftStretch(backbuffer, NULL, sdl_screen, NULL);
+		SDL_Flip(sdl_screen);
+
+		while (SDL_PollEvent(&Event))
+		{
+			if (Event.type == SDL_KEYDOWN)
+			{
+				switch (Event.key.keysym.sym)
+				{
+					case SDLK_LEFT:
+						if (current > 0) current--;
+						break;
+					case SDLK_RIGHT:
+						if (current < count - 1) current++;
+						break;
+					case SDLK_UP:
+						if (current >= cols) current -= cols;
+						break;
+					case SDLK_DOWN:
+						if (current + cols < count) current += cols;
+						break;
+					case SDLK_LCTRL:
+					case SDLK_RETURN:
+						if (pressed_index != current)
+						{
+							if (pressed_index >= 0) multirexz80_sdl12_keyboard_set_key(pressed_index, 0);
+							pressed_index = current;
+							multirexz80_sdl12_keyboard_set_key(pressed_index, 1);
+						}
+						break;
+					case SDLK_LALT:
+					case SDLK_ESCAPE:
+						if (pressed_index >= 0) multirexz80_sdl12_keyboard_set_key(pressed_index, 0);
+						pressed_index = -1;
+						exit_keyboard = 1;
+						break;
+					default:
+						multirexz80_sdl12_keyboard_from_sdl_key(Event.key.keysym.sym, 1);
+						break;
+				}
+			}
+			else if (Event.type == SDL_KEYUP)
+			{
+				switch (Event.key.keysym.sym)
+				{
+					case SDLK_LCTRL:
+					case SDLK_RETURN:
+						if (pressed_index >= 0) multirexz80_sdl12_keyboard_set_key(pressed_index, 0);
+						pressed_index = -1;
+						break;
+					default:
+						multirexz80_sdl12_keyboard_from_sdl_key(Event.key.keysym.sym, 0);
+						break;
+				}
+			}
+			else if (Event.type == SDL_QUIT)
+			{
+				exit_keyboard = 1;
+			}
+		}
+
+		/* Run a frame while a virtual key is held so the emulated keyboard state is sampled. */
+		if (pressed_index >= 0)
+		{
+			system_frame(0);
+			Sound_Update(snd.output, snd.sample_count);
+		}
+		else
+		{
+			SDL_Delay(16);
+		}
+	}
+	if (pressed_index >= 0)
+		multirexz80_sdl12_keyboard_set_key(pressed_index, 0);
+	forcerefresh = 1;
 }
 
 static void Menu()
 {
 	char text[50];
-    int16_t pressed = 0;
-    int16_t currentselection = 1;
-    SDL_Event Event;
-    
-    Sound_Pause();
+	int16_t pressed = 0;
+	int16_t currentselection = 1;
+	int16_t menu_max = multirexz80_sdl12_keyboard_active() ? 8 : 7;
+	int16_t quit_selection = menu_max;
+	SDL_Event Event;
+	
+	Sound_Pause();
 
-    while (((currentselection != 1) && (currentselection != 7)) || (!pressed))
-    {
-        pressed = 0;
- 		SDL_FillRect( backbuffer, NULL, 0 );
-        
+	while (((currentselection != 1) && (currentselection != quit_selection)) || (!pressed))
+	{
+		pressed = 0;
+		SDL_FillRect( backbuffer, NULL, 0 );
+		
 		if (SDL_MUSTLOCK(backbuffer)) SDL_LockSurface(backbuffer);
 
 		print_string("SMS PLUS GX", TextWhite, 0, 105, 15, backbuffer->pixels);
@@ -518,184 +720,189 @@ static void Menu()
 		else  print_string("Continue", TextWhite, 0, 5, 45, backbuffer->pixels);
 		
 		snprintf(text, sizeof(text), "Load State %d", save_slot);
-		
 		if (currentselection == 2) print_string(text, TextRed, 0, 5, 65, backbuffer->pixels);
 		else print_string(text, TextWhite, 0, 5, 65, backbuffer->pixels);
 		
 		snprintf(text, sizeof(text), "Save State %d", save_slot);
-		
 		if (currentselection == 3) print_string(text, TextRed, 0, 5, 85, backbuffer->pixels);
 		else print_string(text, TextWhite, 0, 5, 85, backbuffer->pixels);
 		
-        if (currentselection == 4)
-        {
-			switch(option.fullscreen)
-			{
-				case 0:
-					print_string("Scaling : Native", TextRed, 0, 5, 105, backbuffer->pixels);
+		switch(option.fullscreen)
+		{
+			case 0:
+				print_string("Scaling : Native", (currentselection == 4) ? TextRed : TextWhite, 0, 5, 105, backbuffer->pixels);
 				break;
-				case 1:
-					print_string("Scaling : IPU/Hardware", TextRed, 0, 5, 105, backbuffer->pixels);
+			case 1:
+				print_string("Scaling : IPU/Hardware", (currentselection == 4) ? TextRed : TextWhite, 0, 5, 105, backbuffer->pixels);
 				break;
-				case 2:
-					print_string("Scaling : EPX/Scale2x", TextRed, 0, 5, 105, backbuffer->pixels);
+			case 2:
+				print_string("Scaling : EPX/Scale2x", (currentselection == 4) ? TextRed : TextWhite, 0, 5, 105, backbuffer->pixels);
 				break;
-			}
-        }
-        else
-        {
-			switch(option.fullscreen)
-			{
-				case 0:
-					print_string("Scaling : Native", TextWhite, 0, 5, 105, backbuffer->pixels);
-				break;
-				case 1:
-					print_string("Scaling : IPU/Hardware", TextWhite, 0, 5, 105, backbuffer->pixels);
-				break;
-				case 2:
-					print_string("Scaling : EPX/Scale2x", TextWhite, 0, 5, 105, backbuffer->pixels);
-				break;
-			}
-        }
+		}
 
 		snprintf(text, sizeof(text), "Sound volume : %s", Return_Volume(option.soundlevel));
-		
 		if (currentselection == 5) print_string(text, TextRed, 0, 5, 125, backbuffer->pixels);
 		else print_string(text, TextWhite, 0, 5, 125, backbuffer->pixels);
 		
 		if (currentselection == 6) print_string("Input remapping", TextRed, 0, 5, 145, backbuffer->pixels);
 		else print_string("Input remapping", TextWhite, 0, 5, 145, backbuffer->pixels);
 		
-		if (currentselection == 7) print_string("Quit", TextRed, 0, 5, 165, backbuffer->pixels);
-		else print_string("Quit", TextWhite, 0, 5, 165, backbuffer->pixels);
+		if (multirexz80_sdl12_keyboard_active())
+		{
+			if (currentselection == 7) print_string("Virtual keyboard", TextRed, 0, 5, 165, backbuffer->pixels);
+			else print_string("Virtual keyboard", TextWhite, 0, 5, 165, backbuffer->pixels);
+			if (currentselection == 8) print_string("Quit", TextRed, 0, 5, 185, backbuffer->pixels);
+			else print_string("Quit", TextWhite, 0, 5, 185, backbuffer->pixels);
+		}
+		else
+		{
+			if (currentselection == 7) print_string("Quit", TextRed, 0, 5, 165, backbuffer->pixels);
+			else print_string("Quit", TextWhite, 0, 5, 165, backbuffer->pixels);
+		}
 
-		print_string("Build " __DATE__ ", " __TIME__, TextWhite, 0, 5, 195, backbuffer->pixels);
-		print_string("Based on SMS Plus GX / SMS Plus", TextWhite, 0, 5, 210, backbuffer->pixels);
-		print_string("MultiRexZ80 by gameblabla", TextWhite, 0, 5, 225, backbuffer->pixels);
+		print_string("Build " __DATE__ ", " __TIME__, TextWhite, 0, 5, multirexz80_sdl12_keyboard_active() ? 205 : 195, backbuffer->pixels);
+		print_string("Based on SMS Plus GX / SMS Plus", TextWhite, 0, 5, multirexz80_sdl12_keyboard_active() ? 220 : 210, backbuffer->pixels);
+		print_string("MultiRexZ80 by gameblabla", TextWhite, 0, 5, multirexz80_sdl12_keyboard_active() ? 235 : 225, backbuffer->pixels);
 		
 		if (SDL_MUSTLOCK(backbuffer)) SDL_UnlockSurface(backbuffer);
 
-        while (SDL_PollEvent(&Event))
-        {
-            if (Event.type == SDL_KEYDOWN)
-            {
-                switch(Event.key.keysym.sym)
-                {
-                    case SDLK_UP:
-                        currentselection--;
-                        if (currentselection == 0)
-                            currentselection = 7;
-                        break;
-                    case SDLK_DOWN:
-                        currentselection++;
-                        if (currentselection == 8)
-                            currentselection = 1;
-                        break;
-                    case SDLK_LALT:
-                    case SDLK_END:
-                    case SDLK_ESCAPE:
+		while (SDL_PollEvent(&Event))
+		{
+			if (Event.type == SDL_KEYDOWN)
+			{
+				switch(Event.key.keysym.sym)
+				{
+					case SDLK_UP:
+						currentselection--;
+						if (currentselection == 0) currentselection = menu_max;
+						break;
+					case SDLK_DOWN:
+						currentselection++;
+						if (currentselection > menu_max) currentselection = 1;
+						break;
+					case SDLK_LALT:
+					case SDLK_END:
+					case SDLK_ESCAPE:
 						pressed = 1;
 						currentselection = 1;
 						break;
-                    case SDLK_LCTRL:
-                    case SDLK_RETURN:
-                        pressed = 1;
-                        break;
-                    case SDLK_LEFT:
-                        switch(currentselection)
-                        {
-							default:
-							break;
-                            case 2:
-                            case 3:
-                                if (save_slot > 0) save_slot--;
-							break;
-                            case 4:
-							option.fullscreen--;
-							if (option.fullscreen < 0)
-								option.fullscreen = upscalers_available;
-							break;
+					case SDLK_LCTRL:
+					case SDLK_RETURN:
+						pressed = 1;
+						break;
+					case SDLK_LEFT:
+						switch(currentselection)
+						{
+							case 2:
+							case 3:
+								if (save_slot > 0) save_slot--;
+								break;
+							case 4:
+								option.fullscreen--;
+								if (option.fullscreen < 0) option.fullscreen = upscalers_available;
+								break;
 							case 5:
 								option.soundlevel--;
-								if (option.soundlevel > 4)
-									option.soundlevel = 4;
-							break;
-                        }
-                        break;
-                    case SDLK_RIGHT:
-                        switch(currentselection)
-                        {
+								if (option.soundlevel > 4) option.soundlevel = 4;
+								break;
 							default:
-							break;
-                            case 2:
-                            case 3:
-                                save_slot++;
-								if (save_slot == 10)
-									save_slot = 9;
-							break;
-                            case 4:
-                                option.fullscreen++;
-                                if (option.fullscreen > upscalers_available)
-                                    option.fullscreen = 0;
-							break;
+								break;
+						}
+						break;
+					case SDLK_RIGHT:
+						switch(currentselection)
+						{
+							case 2:
+							case 3:
+								save_slot++;
+								if (save_slot == 10) save_slot = 9;
+								break;
+							case 4:
+								option.fullscreen++;
+								if (option.fullscreen > upscalers_available) option.fullscreen = 0;
+								break;
 							case 5:
 								option.soundlevel++;
-								if (option.soundlevel > 4)
-									option.soundlevel = 0;
-							break;
-                        }
-                        break;
+								if (option.soundlevel > 4) option.soundlevel = 0;
+								break;
+							default:
+								break;
+						}
+						break;
 					default:
-					break;
-                }
-            }
-            else if (Event.type == SDL_QUIT)
-            {
-				currentselection = 7;
+						break;
+				}
+			}
+			else if (Event.type == SDL_QUIT)
+			{
+				currentselection = quit_selection;
 				pressed = 1;
 			}
-        }
+		}
 
-        if (pressed)
-        {
-            switch(currentselection)
-            {
+		if (pressed)
+		{
+			switch(currentselection)
+			{
+				case 7:
+					if (multirexz80_sdl12_keyboard_active())
+					{
+						Virtual_Keyboard();
+						pressed = 0;
+					}
+					break;
 				case 6:
 					Input_Remapping();
-				break;
+					break;
 				case 5:
 					option.soundlevel++;
-					if (option.soundlevel > 4)
-						option.soundlevel = 1;
-				break;
-                case 4 :
-                    option.fullscreen++;
-                    if (option.fullscreen > upscalers_available)
-                        option.fullscreen = 0;
-                    break;
-                case 2 :
-                    smsp_state(save_slot, 1);
+					if (option.soundlevel > 4) option.soundlevel = 1;
+					break;
+				case 4:
+					option.fullscreen++;
+					if (option.fullscreen > upscalers_available) option.fullscreen = 0;
+					break;
+				case 2:
+					smsp_state(save_slot, 1);
 					currentselection = 1;
-                    break;
-                case 3 :
+					break;
+				case 3:
 					smsp_state(save_slot, 0);
 					currentselection = 1;
-				break;
+					break;
 				default:
-				break;
-            }
-        }
+					break;
+			}
+		}
 		SDL_SoftStretch(backbuffer, NULL, sdl_screen, NULL);
 		SDL_Flip(sdl_screen);
-    }
-    
+	}
+	
 	sms.use_fm = option.fm;
-    
+	
 	Clear_video();
-    if (currentselection == 7)
-        quit = 1;
+	if (currentselection == quit_selection)
+		quit = 1;
 	else
 		Sound_Unpause();
+}
+
+static void Ensure_Extended_Mapping(void)
+{
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_COIN1] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_COIN1] = SDLK_TAB;
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_COIN2] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_COIN2] = SDLK_BACKSPACE;
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_START1] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_START1] = SDLK_RETURN;
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_START2] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_START2] = SDLK_SPACE;
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_SERVICE] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_SERVICE] = SDLK_PAGEUP;
+	if (option.config_buttons[CONFIG_BUTTON_ARCADE_TEST] == 0)
+		option.config_buttons[CONFIG_BUTTON_ARCADE_TEST] = SDLK_PAGEDOWN;
+	if (option.config_buttons[CONFIG_BUTTON_VKBD] == 0)
+		option.config_buttons[CONFIG_BUTTON_VKBD] = SDLK_TAB;
 }
 
 static void Reset_Mapping()
@@ -712,10 +919,11 @@ static void Reset_Mapping()
 	option.config_buttons[CONFIG_BUTTON_START] = SDLK_RETURN;
 	
 	/* This is for the Colecovision buttons. Don't set those to anything */
-	for (i = 7; i < 18; i++)
+	for (i = 7; i < 19; i++)
 	{
 		option.config_buttons[i] = 0;
-	}	
+	}
+	Ensure_Extended_Mapping();
 }
 
 static void config_load()
@@ -735,6 +943,10 @@ static void config_load()
 		if (option.config_buttons[CONFIG_BUTTON_UP] == 0)
 		{
 			Reset_Mapping();
+		}
+		else
+		{
+			Ensure_Extended_Mapping();
 		}
 	}
 	else
@@ -818,6 +1030,7 @@ int update_window_size(int w, int h)
 	}
 
 	if (vdp.height == 0) remember_res_height = HOST_HEIGHT_RESOLUTION;
+	video_clear_pending = 1;
 	
 	return 0;
 }
@@ -855,7 +1068,7 @@ int main (int argc, char *argv[])
 	// Sometimes Game Gear games are not properly detected, force them accordingly
 	else if (strcmp(strrchr(argv[1], '.'), ".gg") == 0) option.console = 3;
 	
-	if (option.fullscreen < 0 && option.fullscreen > upscalers_available) option.fullscreen = 1;
+	if (option.fullscreen < 0 || option.fullscreen > upscalers_available) option.fullscreen = 1;
 	
 	// Load ROM
 	if(!load_rom(argv[1])) 
@@ -926,7 +1139,14 @@ int main (int argc, char *argv[])
 				default:
 				break;
 				case SDL_KEYUP:
-					sdl_controls_update_input(event.key.keysym.sym, 0);
+					{
+						multirexz80_sdl12_keymap_t map;
+						multirexz80_sdl12_keymap_from_config(&map, option.config_buttons);
+						if (multirexz80_sdl12_keyboard_active() && event.key.keysym.sym == map.virtual_keyboard)
+							virtual_keyboard_requested = 1;
+						else
+							sdl_controls_update_input(event.key.keysym.sym, 0);
+					}
 					switch(event.key.keysym.sym) 
 					{
 						/*
@@ -946,7 +1166,12 @@ int main (int argc, char *argv[])
 					}
 				break;
 				case SDL_KEYDOWN:
-					sdl_controls_update_input(event.key.keysym.sym, 1);
+					{
+						multirexz80_sdl12_keymap_t map;
+						multirexz80_sdl12_keymap_from_config(&map, option.config_buttons);
+						if (!(multirexz80_sdl12_keyboard_active() && event.key.keysym.sym == map.virtual_keyboard))
+							sdl_controls_update_input(event.key.keysym.sym, 1);
+					}
 				break;
 				case SDL_JOYAXISMOTION:
 					switch (event.jaxis.axis)
@@ -993,6 +1218,14 @@ int main (int argc, char *argv[])
 		
 		// Refresh video data
 		video_update();
+
+		if (virtual_keyboard_requested)
+		{
+			virtual_keyboard_requested = 0;
+			Virtual_Keyboard();
+			Clear_video();
+			forcerefresh = 1;
+		}
 		
 		if (selectpressed == 1)
 		{

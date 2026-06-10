@@ -13,6 +13,7 @@ endif
 # Possible choices : z80 (accurate), eighty (EightyZ80's core, GPLv2)
 Z80_CORE = z80
 SCALE2X_UPSCALER = 1
+PROFILE_DIR ?= .
 PROFILE = APPLY
 ZIP_SUPPORT = 1
 STATIC_MEMORY ?= 0
@@ -45,10 +46,11 @@ OBJ_CP		= $(notdir $(patsubst %.cpp, %.o, $(SRC_CP)))
 OBJS		= $(OBJ_C) $(OBJ_CP)
 
 CFLAGS		= -Wall -Wextra -Ofast -fdata-sections -ffunction-sections -mframe-header-opt -mno-fp-exceptions -mno-check-zero-division -fsingle-precision-constant -fno-common -march=mips32r2 -mtune=mips32r2 -flto
+CFLAGS		+= -mbranch-likely -mbranch-cost=2
 CFLAGS		+= -mno-xgot -fsection-anchors -fno-builtin -mplt -fno-PIC -mno-shared  -mno-memcpy
 CFLAGS		+= -fno-math-errno -freorder-functions -std=gnu99
 
-CFLAGS		+= -DNOBLANKING_LEFTCOLUM -DOPENDINGUX_GCD_16PIXELS_ISSUE
+CFLAGS		+= -DNOBLANKING_LEFTCOLUM -DOPENDINGUX_GCD_16PIXELS_ISSUE -DMULTIREXZ80_SCALE2X_TARGET_NATIVE
 CFLAGS		+= $(FEATURE_DEFS) -DLSB_FIRST -std=gnu99
 CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/scalers -Isource/ports/$(PORT) -Isource/ports/sdl12_common -Isource/unzip -Isource/sdl -Isource/sound_output
 
@@ -56,9 +58,9 @@ SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate=/usr/local/home
+CFLAGS 		+= -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE), APPLY)
-CFLAGS		+= -fprofile-use -fbranch-probabilities
+CFLAGS		+= -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
 endif
 
 ifeq ($(PSG_ENGINE), mame_sn76489)

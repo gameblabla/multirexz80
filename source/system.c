@@ -102,6 +102,43 @@ static void lightgun_update_dpad_cursor(void)
 	}
 }
 
+
+static void sms_process_horizontal_interrupt(int32_t iline, int32_t cycles_per_line)
+{
+	if (sms.console < CONSOLE_SMS)
+		return;
+
+	if (vdp.line > iline)
+		return;
+
+	if (--vdp.left < 0)
+	{
+		vdp.left = vdp.reg[0x0A];
+		vdp.hint_pending = 1;
+		if (vdp.reg[0x00] & 0x10)
+		{
+			/* IRQ line is latched between instructions, on instruction last cycle.
+			 * Preserve the legacy exact-line-start quirk for the compatibility path;
+			 * timed SMS/GG HINTs occur after the line has started. */
+			if (!(z80_get_elapsed_cycles() % cycles_per_line))
+				z80_execute(1);
+			z80_set_irq_line(0, ASSERT_LINE);
+		}
+	}
+
+	if (sms.console == CONSOLE_SYSTEME && --vdp2.left < 0)
+	{
+		vdp2.left = vdp2.reg[0x0A];
+		vdp2.hint_pending = 1;
+		if (vdp2.reg[0x00] & 0x10)
+		{
+			if (!(z80_get_elapsed_cycles() % cycles_per_line))
+				z80_execute(1);
+			z80_set_irq_line(0, ASSERT_LINE);
+		}
+	}
+}
+
 /* Run the virtual console emulation for one frame */
 void system_frame(uint32_t skip_render)
 {
@@ -144,68 +181,106 @@ void system_frame(uint32_t skip_render)
 	/* 3D glasses faking */
 	if (sms.glasses_3d) skip_render = sms.wram[0x1ffb];
 
+	vdp_frame_scroll_latch_start();
+
 	/* VDP register 9 is latched during VBLANK */
 	vdp.vscroll = vdp.reg[9];
+	if (sms.console != CONSOLE_SYSTEME)
+		vdp_latch_sprite_mode();
 
 	/* Reload Horizontal Interrupt counter */
 	vdp.left = vdp.reg[0x0A];
 
-	/* Reset collision flag infos */
+	/* Reset sprite status request timing for the new frame.  Visible status bits
+	 * themselves are still cleared by VDP status reads. */
 	vdp.spr_col = 0xff00;
+	vdp.spr_col_pending = 0;
+	vdp.spr_ovr_pending = 0;
 	if (sms.console == CONSOLE_SYSTEME) systeme_vdp_frame_start();
 
 	/* Line processing */
 	for(vdp.line = 0; vdp.line < vdp.lpf; vdp.line++)
 	{
+		int32_t line_start = line_z80;
+		int32_t render_target = line_start + vdp_render_event_cycle();
+		int32_t line_end;
+		int timed_render = vdp_timed_render_active();
+
 		if (sms.console == CONSOLE_SYSTEME) systeme_vdp_set_line(vdp.line);
 		iline = vdp.height;
 
-		/* VDP line rendering */
-		if(!skip_render) render_line(vdp.line);
+		/* Standard path renders at line start for compatibility.  When a
+		 * program has been observed changing SMS/GG sprite mode mid-active
+		 * display, switch to the late render event used by the real VDP. */
+		if (timed_render)
+			vdp_prepare_scanline(vdp.line, skip_render);
+		else if(!skip_render)
+			render_line(vdp.line);
 
 		/* Horizontal Interrupt */
-		if (sms.console >= CONSOLE_SMS)
-		{
-			if(vdp.line <= iline)
-			{
-				if(--vdp.left < 0)
-				{
-					vdp.left = vdp.reg[0x0A];
-					vdp.hint_pending = 1;
-					if(vdp.reg[0x00] & 0x10)
-					{
-						/* IRQ line is latched between instructions, on instruction last cycle          */
-						/* This means that if Z80 cycle count is exactly a multiple of CYCLES_PER_LINE, */
-						/* interrupt should be triggered AFTER the next instruction.                    */
-						if (!(z80_get_elapsed_cycles()%cycles_per_line))
-							z80_execute(1);
-						z80_set_irq_line(0, ASSERT_LINE);
-					}
-				}
-				if(sms.console == CONSOLE_SYSTEME && --vdp2.left < 0)
-				{
-					vdp2.left = vdp2.reg[0x0A];
-					vdp2.hint_pending = 1;
-					if(vdp2.reg[0x00] & 0x10)
-					{
-						if (!(z80_get_elapsed_cycles()%cycles_per_line))
-							z80_execute(1);
-						z80_set_irq_line(0, ASSERT_LINE);
-					}
-				}
-			}
-		}
+		if (!timed_render)
+			sms_process_horizontal_interrupt(iline, cycles_per_line);
 
 		/* Run Z80 CPU */
-		line_z80 += cycles_per_line;
-		z80_execute((line_z80 - z80_cycle_count));
+		line_end = line_start + cycles_per_line;
+		line_z80 = line_end;
+		if (timed_render)
+		{
+			int32_t xscroll_target = line_start + vdp_xscroll_event_cycle();
+			int32_t hint_target = line_start + vdp_hint_event_cycle();
+			int32_t vint_irq_target = line_start + (vdp_gamegear_timing_active() ? 27 : 14);
+			int32_t vint_flag_target = line_start + (vdp_gamegear_timing_active() ? 27 : 15);
+			if (xscroll_target > line_end)
+				xscroll_target = line_end;
+			if (hint_target > line_end)
+				hint_target = line_end;
+			if (render_target > line_end)
+				render_target = line_end;
+			if (vint_irq_target > line_end)
+				vint_irq_target = line_end;
+			if (vint_flag_target > line_end)
+				vint_flag_target = line_end;
+
+			if (xscroll_target > z80_cycle_count)
+				z80_execute(xscroll_target - z80_cycle_count);
+			vdp_latch_hscroll();
+
+			if (vdp.line == (iline + 1))
+			{
+				if (vint_irq_target > z80_cycle_count)
+					z80_execute(vint_irq_target - z80_cycle_count);
+				vdp.vint_pending = 1;
+				if (vdp.reg[0x01] & 0x20)
+					z80_set_irq_line(vdp.irq, ASSERT_LINE);
+
+				if (vint_flag_target > z80_cycle_count)
+					z80_execute(vint_flag_target - z80_cycle_count);
+				vdp.status |= 0x80;
+				vdp.vint_pending = 1;
+			}
+
+			if (hint_target > z80_cycle_count)
+				z80_execute(hint_target - z80_cycle_count);
+			sms_process_horizontal_interrupt(iline, cycles_per_line);
+
+			if (render_target > z80_cycle_count)
+				z80_execute(render_target - z80_cycle_count);
+			vdp_render_scanline_now();
+			if (line_end > z80_cycle_count)
+				z80_execute(line_end - z80_cycle_count);
+		}
+		else
+		{
+			z80_execute(line_z80 - z80_cycle_count);
+		}
 #ifdef SORDM5_EMU
 		if (sms.console == CONSOLE_SORDM5)
 			sordm5_ctc_tick(cycles_per_line);
 #endif
 		
-		/* Vertical Interrupt */
-		if(vdp.line == iline)
+		/* Vertical Interrupt.  Timed SMS/GG mode asserts this at its hardware
+		 * cycle inside the following line; legacy/System E keep the old path. */
+		if(!timed_render && vdp.line == iline)
 		{
 			vdp.status |= 0x80;
 			vdp.vint_pending = 1;
@@ -226,6 +301,11 @@ void system_frame(uint32_t skip_render)
 			if((sms.console == CONSOLE_SYSTEME) && (vdp2.reg[0x01] & 0x20))
 				z80_set_irq_line(vdp.irq, ASSERT_LINE);
 		}
+
+		/* Commit sprite collision/overflow requests whose hardware cycle has
+		 * passed even when the program does not read the VDP status port on
+		 * that exact scanline. The visible flags persist until status read. */
+		vdp_update_status_end_of_scanline();
 
 		/* Run sound chips */
 		MULTIREXZ80_sound_update(vdp.line);

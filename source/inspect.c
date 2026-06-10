@@ -13,12 +13,14 @@
 #include "inspect.h"
 
 #ifdef MULTIREXZ80_HEADLESS
+int multirexz80_inspect_trace_active;
 static FILE *trace_fp;
 static uint64_t trace_frame;
 
 void multirexz80_inspect_set_trace(FILE *fp)
 {
     trace_fp = fp;
+    multirexz80_inspect_trace_active = (fp != NULL);
     if (trace_fp)
     {
         fprintf(trace_fp, "type,frame,line,cycles,pc,sp,detail,a,b,c,d,e,h,l,ix,iy,dev_port,dev_addr,data,code\n");

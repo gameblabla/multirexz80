@@ -439,7 +439,7 @@ void MULTIREXZ80_sound_update(int32_t line)
 		/* Generate FM sample data */
 		if (sms.console == CONSOLE_SNKPSYCHOS)
 			snk_psychos_sound_update(fm, snd.sample_count - snd.done_so_far);
-		else
+		else if (sms.use_fm)
 			FM_Update(fm, snd.sample_count - snd.done_so_far);
 
 		/* Mix streams into output buffer */
@@ -469,7 +469,7 @@ void MULTIREXZ80_sound_update(int32_t line)
 		/* Generate FM sample data */
 		if (sms.console == CONSOLE_SNKPSYCHOS)
 			snk_psychos_sound_update(fm, tinybit);
-		else
+		else if (sms.use_fm)
 			FM_Update(fm, tinybit);
 
 		/* Sum total */

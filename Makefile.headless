@@ -6,15 +6,20 @@ PSG_ENGINE := $(SOUND_ENGINE)
 endif
 Z80_CORE ?= z80
 RENDER_BPP ?= 32
+PROFILE ?= 0
+PROFILE_DIR ?= .
 STATIC_MEMORY ?= 0
 STATIC_MEMORY_BYTES ?= 16777216
 ENABLE_ARCADE ?= 1
 ENABLE_COLECO ?= 1
 ENABLE_SORDM5 ?= 1
+GPROF ?= 0
+CLANG_AUDIT ?= 0
+ENABLE_DEBUG_CONSOLE ?= 0
 
 PSG_DEFS :=
 RENDER_DEFS :=
-FEATURE_DEFS := -DMULTIREXZ80_ENABLE_ARCADE=$(ENABLE_ARCADE) -DMULTIREXZ80_ENABLE_COLECO=$(ENABLE_COLECO) -DMULTIREXZ80_ENABLE_SORDM5=$(ENABLE_SORDM5)
+FEATURE_DEFS := -DMULTIREXZ80_ENABLE_ARCADE=$(ENABLE_ARCADE) -DMULTIREXZ80_ENABLE_COLECO=$(ENABLE_COLECO) -DMULTIREXZ80_ENABLE_SORDM5=$(ENABLE_SORDM5) -DMULTIREXZ80_DEBUG_CONSOLE=$(ENABLE_DEBUG_CONSOLE)
 ifeq ($(PSG_ENGINE),mame_sn76489)
 PSG_DEFS += -DMAME_PSG
 endif
@@ -43,13 +48,32 @@ OBJS        = $(OBJ_C)
 
 CFLAGS      = -O2 -g -Wall -Wextra -std=gnu99
 CFLAGS      += -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_HEADLESS $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS)
+ifeq ($(CLANG_AUDIT),1)
+CFLAGS      += -Weverything -Wcast-align -Wstrict-aliasing=2
+endif
 ifeq ($(STATIC_MEMORY),1)
 CFLAGS      += -DMULTIREXZ80_STATIC_MEMORY -DMULTIREXZ80_STATIC_MEMORY_BYTES=$(STATIC_MEMORY_BYTES)
 endif
+ifeq ($(GPROF),1)
+CFLAGS      += -pg -fno-omit-frame-pointer
+endif
 CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/headless -Isource/sound_output -Isource/unzip
+ifeq ($(PROFILE),YES)
+CFLAGS      += -fprofile-generate=$(PROFILE_DIR)
+else ifeq ($(PROFILE),APPLY)
+CFLAGS      += -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
+endif
+ifeq ($(GPROF),1)
+OPL_CFLAGS   = -O3 -g -fno-stack-protector -DNDEBUG
+HOT_CFLAGS   = -O3 -g -fno-stack-protector -DNDEBUG
+else
 OPL_CFLAGS   = -Ofast -fomit-frame-pointer -fno-stack-protector -DNDEBUG
 HOT_CFLAGS   = -O3 -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+endif
 LDFLAGS     = -lm
+ifeq ($(GPROF),1)
+LDFLAGS     += -pg
+endif
 
 $(PRGNAME): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PRGNAME) $^ $(LDFLAGS)
@@ -57,8 +81,141 @@ $(PRGNAME): $(OBJS)
 opl.o mame_fmopl.o mame_ymdeltat.o crab_ym2413.o: CFLAGS += $(OPL_CFLAGS)
 z80.o system1.o snk_psychos.o sound.o: CFLAGS += $(HOT_CFLAGS)
 
+
+# Force object rebuilds when this makefile changes. This prevents stale .o
+# files from an older checkout from being linked after a source-only overlay.
+$(OBJS): Makefile.headless
+
 $(OBJ_C) : %.o : %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+PSYCHOS_ROM ?= psychos.zip
+PSYCHOS_AUDIO_FRAMES ?= 3000
+PSYCHOS_AUDIO_WAV ?= psychos_audio.wav
+PSYCHOS_AUDIO_BASELINE ?=
+PSYCHOS_AUDIO_BASELINE_SHA256 ?=
+
+test-psychos-audio: $(PRGNAME)
+	python3 source/tests/psychos_audio_regression.py --binary ./$(PRGNAME) --rom $(PSYCHOS_ROM) --frames $(PSYCHOS_AUDIO_FRAMES) --wav $(PSYCHOS_AUDIO_WAV) $(if $(PSYCHOS_AUDIO_BASELINE),--baseline-wav $(PSYCHOS_AUDIO_BASELINE),) $(if $(PSYCHOS_AUDIO_BASELINE_SHA256),--baseline-pcm-sha256 $(PSYCHOS_AUDIO_BASELINE_SHA256),) --quiet
+
+BLOCKGAL_ROM ?= blockgal.zip
+BLOCKGAL_FRAMES ?= 3000
+BLOCKGAL_SCREENSHOT ?= blockgal.ppm
+BLOCKGAL_AUDIO_WAV ?=
+BLOCKGAL_SCREENSHOT_SHA256 ?=
+BLOCKGAL_PCM_SHA256 ?=
+
+test-blockgal: $(PRGNAME)
+	python3 source/tests/blockgal_regression.py --binary ./$(PRGNAME) --rom $(BLOCKGAL_ROM) --frames $(BLOCKGAL_FRAMES) --screenshot $(BLOCKGAL_SCREENSHOT) $(if $(BLOCKGAL_AUDIO_WAV),--wav $(BLOCKGAL_AUDIO_WAV),) $(if $(BLOCKGAL_SCREENSHOT_SHA256),--baseline-screenshot-sha256 $(BLOCKGAL_SCREENSHOT_SHA256),) $(if $(BLOCKGAL_PCM_SHA256),--baseline-pcm-sha256 $(BLOCKGAL_PCM_SHA256),) --quiet
+
 clean:
 	rm -f $(PRGNAME) *.o
+
+clang-audit:
+	$(MAKE) -f Makefile.headless clean
+	$(MAKE) -f Makefile.headless CC=clang CLANG_AUDIT=1
+
+SYSTEM1_REGRESSION_FRAMES ?= 3600
+SYSTEM1_REGRESSION_ROM_DIR ?= roms
+SYSTEM1_REGRESSION_OUT_DIR ?= test-results/system1_regression
+
+test-system1-regression: $(PRGNAME)
+	SYSTEM1_REGRESSION_NO_BUILD=1 SYSTEM1_REGRESSION_BINARY=./$(PRGNAME) SYSTEM1_REGRESSION_ROM_DIR=$(SYSTEM1_REGRESSION_ROM_DIR) SYSTEM1_REGRESSION_OUT_DIR=$(SYSTEM1_REGRESSION_OUT_DIR) SYSTEM1_REGRESSION_FRAMES=$(SYSTEM1_REGRESSION_FRAMES) source/tests/run_system1_regression.sh
+
+HEADLESS_REGRESSION_ROM_DIR ?= roms
+HEADLESS_REGRESSION_OUT_DIR ?= test-results/headless_regression
+HEADLESS_REGRESSION_FRAMES ?=
+
+test-headless-regression: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(HEADLESS_REGRESSION_ROM_DIR) --out-dir $(HEADLESS_REGRESSION_OUT_DIR) $(if $(HEADLESS_REGRESSION_FRAMES),--frames $(HEADLESS_REGRESSION_FRAMES),)
+
+TABLES_TURNED_ROM ?= $(HEADLESS_REGRESSION_ROM_DIR)/tables_turned.sms
+TABLES_TURNED_OUT_DIR ?= test-results/tables_turned_spotlight
+TABLES_TURNED_FRAMES ?= 1920
+
+test-tables-turned-spotlight: $(PRGNAME)
+	python3 source/tests/tables_turned_spotlight_regression.py --binary ./$(PRGNAME) --rom "$(TABLES_TURNED_ROM)" --out-dir $(TABLES_TURNED_OUT_DIR) --frames $(TABLES_TURNED_FRAMES)
+
+
+MADOUGG_ROM_DIR ?= roms
+MADOUGG_OUT_DIR ?= test-results/madou_vdp_latch
+
+test-madou-vdp-latch-input: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(MADOUGG_ROM_DIR) --out-dir $(MADOUGG_OUT_DIR) --games madou_gg_vdp_latch
+
+FANTASTIC_DIZZY_ROM_DIR ?= roms
+FANTASTIC_DIZZY_OUT_DIR ?= test-results/fantastic_dizzy_sms_hud
+
+test-fantastic-dizzy-sms-hud: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(FANTASTIC_DIZZY_ROM_DIR) --out-dir $(FANTASTIC_DIZZY_OUT_DIR) --games fantastic_dizzy_sms_hud
+
+FANTASTIC_DIZZY_LANGUAGE_OUT_DIR ?= test-results/fantastic_dizzy_sms_language_logo
+
+test-fantastic-dizzy-sms-language-logo: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(FANTASTIC_DIZZY_ROM_DIR) --out-dir $(FANTASTIC_DIZZY_LANGUAGE_OUT_DIR) --games fantastic_dizzy_sms_language_logo
+
+FANTASTIC_DIZZY_PAPER_SCROLL_OUT_DIR ?= test-results/fantastic_dizzy_sms_paper_scroll
+
+test-fantastic-dizzy-sms-paper-scroll: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(FANTASTIC_DIZZY_ROM_DIR) --out-dir $(FANTASTIC_DIZZY_PAPER_SCROLL_OUT_DIR) --games fantastic_dizzy_sms_paper_scroll
+
+FANTASTIC_DIZZY_LOGO_WAVE_OUT_DIR ?= test-results/fantastic_dizzy_sms_logo_wave
+
+test-fantastic-dizzy-sms-logo-wave: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(FANTASTIC_DIZZY_ROM_DIR) --out-dir $(FANTASTIC_DIZZY_LOGO_WAVE_OUT_DIR) --games fantastic_dizzy_sms_logo_wave_250 fantastic_dizzy_sms_logo_wave_300 fantastic_dizzy_sms_logo_wave_350
+
+FANTASTIC_DIZZY_REGRESSION_OUT_DIR ?= test-results/fantastic_dizzy_sms_regression
+
+test-fantastic-dizzy-sms-regression: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(FANTASTIC_DIZZY_ROM_DIR) --out-dir $(FANTASTIC_DIZZY_REGRESSION_OUT_DIR) --games fantastic_dizzy_sms_logo_wave_250 fantastic_dizzy_sms_logo_wave_300 fantastic_dizzy_sms_logo_wave_350 fantastic_dizzy_sms_hud fantastic_dizzy_sms_language_logo fantastic_dizzy_sms_paper_scroll
+
+FANTASTIC_DIZZY_STATE_ROM ?= $(FANTASTIC_DIZZY_ROM_DIR)/Fantastic Dizzy (Europe) (En,Fr,De,Es,It).sms
+FANTASTIC_DIZZY_STATE ?= $(FANTASTIC_DIZZY_ROM_DIR)/Fantastic_Dizzy__Europe___En_Fr_De_Es_It__B9664AE1.auto.png
+FANTASTIC_DIZZY_STATE_OUT_DIR ?= test-results/fantastic_dizzy_sms_state_right_hud
+FANTASTIC_DIZZY_STATE_FRAMES ?= 1000
+
+test-fantastic-dizzy-sms-state-right-hud: $(PRGNAME)
+	python3 source/tests/fantastic_dizzy_state_hud_regression.py --binary ./$(PRGNAME) --rom "$(FANTASTIC_DIZZY_STATE_ROM)" --load-state "$(FANTASTIC_DIZZY_STATE)" --out-dir $(FANTASTIC_DIZZY_STATE_OUT_DIR) --frames $(FANTASTIC_DIZZY_STATE_FRAMES)
+
+ARCADE_REGRESSION_ROM_DIR ?= roms
+ARCADE_REGRESSION_OUT_DIR ?= test-results/arcade_regression
+
+test-arcade-regression: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(ARCADE_REGRESSION_ROM_DIR) --out-dir $(ARCADE_REGRESSION_OUT_DIR) --games blockgal blockgalb choplift flicky gardia teddybb tetrisse transfrm drift2 psychos ikari athena
+
+test-sonic-drift2-gg: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(SONIC_DRIFT2_GG_ROM_DIR) --out-dir $(SONIC_DRIFT2_GG_OUT_DIR) --games sonic_drift2_gg
+
+TARZAN_GG_ROM_DIR ?= roms
+TARZAN_GG_OUT_DIR ?= test-results/tarzan_gg_hud
+
+test-tarzan-gg-hud: $(PRGNAME)
+	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(TARZAN_GG_ROM_DIR) --out-dir $(TARZAN_GG_OUT_DIR) --games tarzan_gg_hud
+
+ZEXALL_ROM ?= roms/zexall.sms
+ZEXALL_MAX_FRAMES ?= 20000000
+ZEXALL_DEBUG_LOG ?= test-results/zexall_debug_console.log
+
+test-zexall-debug-console:
+	$(MAKE) -f Makefile.headless clean
+	$(MAKE) -f Makefile.headless ENABLE_DEBUG_CONSOLE=1 $(PRGNAME)
+	mkdir -p $(dir $(ZEXALL_DEBUG_LOG))
+	python3 source/tests/zexall_debug_console.py --binary ./$(PRGNAME) --rom $(ZEXALL_ROM) --max-frames $(ZEXALL_MAX_FRAMES) --debug-log $(ZEXALL_DEBUG_LOG) --quiet
+
+SMS_VDP_LATCH_ROM_DIR ?= roms
+SMS_VDP_LATCH_ROM ?= $(SMS_VDP_LATCH_ROM_DIR)/Madou Monogatari I - 3tsu no Madoukyuu (Japan).gg
+SMS_VDP_LATCH_STATE ?=
+SMS_VDP_LATCH_FRAMES ?= 120
+SMS_VDP_LATCH_OUT_DIR ?= test-results/sms_vdp_latch
+SMS_VDP_LATCH_SCREENSHOT_SHA256 ?=
+SMS_VDP_LATCH_PCM_SHA256 ?=
+
+test-sms-vdp-latch: $(PRGNAME)
+	@test -n "$(SMS_VDP_LATCH_STATE)" || { echo "SMS_VDP_LATCH_STATE is required; point it at a PNG/.sgxst state for the problematic scene." >&2; exit 2; }
+	python3 source/tests/sms_vdp_latch_regression.py --binary ./$(PRGNAME) --rom-dir $(SMS_VDP_LATCH_ROM_DIR) --rom "$(SMS_VDP_LATCH_ROM)" --load-state "$(SMS_VDP_LATCH_STATE)" --frames $(SMS_VDP_LATCH_FRAMES) --out-dir $(SMS_VDP_LATCH_OUT_DIR) $(if $(SMS_VDP_LATCH_SCREENSHOT_SHA256),--screenshot-sha256 $(SMS_VDP_LATCH_SCREENSHOT_SHA256),) $(if $(SMS_VDP_LATCH_PCM_SHA256),--pcm-sha256 $(SMS_VDP_LATCH_PCM_SHA256),)
+
+VDPTEST_ROM_DIR ?= roms
+VDPTEST_OUT_DIR ?= test-results/vdptest_sms
+
+test-vdptest-sms: $(PRGNAME)
+	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR)

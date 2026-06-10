@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Sega System 1 headless regression suite.
+
+The default workflow is intended for a normal PC checkout:
+
+    python3 source/tests/system1_regression.py
+
+It builds Makefile.headless, looks for ROM ZIP files in ./roms next to the
+Makefile, runs each game long enough to get past startup/self-check screens,
+and compares both final video (PPM SHA-256) and audio (WAV PCM SHA-256).
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import wave
+
+GAMES = {
+    "blockgal": {
+        "rom": "blockgal.zip",
+        "console": "system1",
+        "screenshot_sha256": "723dc2ecc2f687188acd7771fa15c43daa9612b65bc2078ae2a2a6c501fafcf1",
+        "pcm_sha256": "91072cf751b4a71bcb9e3ee7b7de2c36c707a3752d69312b3b5fc72cd3b470a2",
+    },
+    "blockgalb": {
+        "rom": "blockgalb.zip",
+        "console": "system1",
+        "screenshot_sha256": "f268e9645b50088746cf8a3406394c151d5b51092daf5a5c89d385feba2da675",
+        "pcm_sha256": "5620aef16277f41a8ba1e5f6f8804eb7ed30033a575fdbf3a885447e85ee8c8a",
+    },
+    "choplift": {
+        "rom": "choplift.zip",
+        "console": "system1",
+        "screenshot_sha256": "5c58d4bb482315b7a4aa4e6abf7865c8facd862259885c6d54926e6d4bcd7601",
+        "pcm_sha256": "5b32b840a68666cad8ee454c56e180beb38986524d7f407c17f1645a0d791cc2",
+    },
+    "flicky": {
+        "rom": "flicky.zip",
+        "console": "system1",
+        "screenshot_sha256": "af2c76cd3bf642d7f141023df9187f810e153f6b5f7f50a6fe6f985921349daa",
+        "pcm_sha256": "04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669",
+    },
+    "gardia": {
+        "rom": "gardia.zip",
+        "console": "system1",
+        "screenshot_sha256": "5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa",
+        "pcm_sha256": "460723343cd5be08ca004c6fae269ba6038cd7225e1f5427665dbe080db69f36",
+    },
+    "teddybb": {
+        "rom": "teddybb.zip",
+        "console": "system1",
+        "screenshot_sha256": "c65e2a00e1ce211724b6f9bbc2412f5ef7b51b6deaff8ed6bde19a9bb1108448",
+        "pcm_sha256": "6c466ee5b2f9ddaaa225bfede26e2fa041e2ed952b0de0f2db97216798931242",
+    },
+}
+
+
+def project_root_from_script() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def pcm_sha256_wav(path: Path) -> tuple[str, str]:
+    with wave.open(str(path), "rb") as w:
+        params = w.getparams()
+        pcm = w.readframes(w.getnframes())
+    if params.nchannels != 2:
+        raise AssertionError(f"{path}: expected stereo WAV, got {params.nchannels} channel(s)")
+    if params.sampwidth != 2:
+        raise AssertionError(f"{path}: expected 16-bit WAV, got {params.sampwidth * 8}-bit")
+    if params.framerate <= 0 or params.nframes <= 0:
+        raise AssertionError(f"{path}: WAV has no audio frames")
+    return hashlib.sha256(pcm).hexdigest(), f"{params.nframes}f/{params.framerate}Hz"
+
+
+def run_checked(cmd: list[str], cwd: Path, timeout: float | None = None) -> None:
+    proc = subprocess.run(cmd, cwd=str(cwd), timeout=timeout)
+    if proc.returncode != 0:
+        raise SystemExit(proc.returncode)
+
+
+def build_headless(root: Path, makefile: str, jobs: int) -> None:
+    cmd = ["make", "-f", makefile, f"-j{jobs}"]
+    print("Building headless:", " ".join(cmd))
+    run_checked(cmd, root)
+
+
+def main(argv: list[str]) -> int:
+    root_default = project_root_from_script()
+    ap = argparse.ArgumentParser(description="Build and run deterministic Sega System 1 headless audio/video regressions.")
+    ap.add_argument("--root", type=Path, default=root_default, help="project root; defaults to the directory containing Makefile.headless")
+    ap.add_argument("--makefile", default="Makefile.headless", help="headless Makefile name")
+    ap.add_argument("--binary", default="./multirexz80_headless", help="headless binary path, relative to --root unless absolute")
+    ap.add_argument("--rom-dir", type=Path, default=None, help="ROM directory; defaults to ./roms next to the Makefile")
+    ap.add_argument("--out-dir", type=Path, default=None, help="output directory; defaults to ./test-results/system1_regression")
+    ap.add_argument("--frames", type=int, default=3600, help="frames per game; default is 3600, about 60 seconds at 60 Hz")
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2, help="make parallelism")
+    ap.add_argument("--no-build", action="store_true", help="do not build before running")
+    ap.add_argument("--games", nargs="+", choices=sorted(GAMES), default=list(GAMES), help="subset of games to run")
+    ap.add_argument("--timeout", type=float, default=180.0, help="per-game timeout in seconds")
+    args = ap.parse_args(argv)
+
+    root = args.root.resolve()
+    rom_dir = (args.rom_dir if args.rom_dir is not None else root / "roms").resolve()
+    out_dir = (args.out_dir if args.out_dir is not None else root / "test-results" / "system1_regression").resolve()
+    binary = Path(args.binary)
+    if not binary.is_absolute():
+        binary = root / binary
+
+    if args.frames <= 0:
+        raise SystemExit("--frames must be positive")
+    if not (root / args.makefile).exists():
+        raise SystemExit(f"Makefile not found: {root / args.makefile}")
+    if not rom_dir.is_dir():
+        raise SystemExit(f"ROM directory not found: {rom_dir}")
+
+    missing = [spec["rom"] for name, spec in GAMES.items() if name in args.games and not (rom_dir / spec["rom"]).exists()]
+    if missing:
+        raise SystemExit("Missing ROM(s) in %s: %s" % (rom_dir, ", ".join(missing)))
+
+    if not args.no_build:
+        build_headless(root, args.makefile, args.jobs)
+    if not binary.exists():
+        raise SystemExit(f"headless binary not found: {binary}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    failures: list[str] = []
+    print("\nSega System 1 regression, frames=%d" % args.frames)
+    print("%-10s %-9s %-9s %-10s %s" % ("game", "video", "audio", "seconds", "outputs"))
+
+    for name in args.games:
+        spec = GAMES[name]
+        ppm = out_dir / f"{name}.ppm"
+        wav = out_dir / f"{name}.wav"
+        rom = rom_dir / spec["rom"]
+        cmd = [str(binary), "--console", spec["console"], "--frames", str(args.frames), "--screenshot", str(ppm), "--audio-wav", str(wav), "--quiet", str(rom)]
+        start = time.perf_counter()
+        try:
+            run_checked(cmd, root, timeout=args.timeout)
+            elapsed = time.perf_counter() - start
+            video_sha = sha256_file(ppm)
+            audio_sha, wav_desc = pcm_sha256_wav(wav)
+            video_ok = video_sha == spec["screenshot_sha256"]
+            audio_ok = audio_sha == spec["pcm_sha256"]
+            if not video_ok:
+                failures.append(f"{name}: screenshot SHA-256 mismatch: got {video_sha}, expected {spec['screenshot_sha256']}")
+            if not audio_ok:
+                failures.append(f"{name}: PCM SHA-256 mismatch: got {audio_sha}, expected {spec['pcm_sha256']}")
+            print("%-10s %-9s %-9s %-10.3f %s, %s" % (name, "ok" if video_ok else "FAIL", "ok" if audio_ok else "FAIL", elapsed, ppm.name, wav_desc))
+        except Exception as exc:  # keep reporting the whole suite when possible
+            failures.append(f"{name}: {exc}")
+            print("%-10s %-9s %-9s %-10s %s" % (name, "FAIL", "FAIL", "-", exc))
+
+    if failures:
+        print("\nREGRESSION DETECTED")
+        for f in failures:
+            print("  -", f)
+        return 1
+    print("\nAll System 1 audio/video regressions passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -13,6 +13,7 @@ endif
 # Possible choices : z80 (accurate but proprietary), eighty (EightyZ80's core, GPLv2)
 Z80_CORE = z80
 SCALE2X_UPSCALER = 1
+PROFILE_DIR ?= .
 PROFILE = 0
 ZIP_SUPPORT = 1
 STATIC_MEMORY ?= 0
@@ -53,9 +54,9 @@ SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate=./
+CFLAGS 		+= -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE), APPLY)
-CFLAGS		+= -fprofile-use -fbranch-probabilities
+CFLAGS		+= -fprofile-use=$(PROFILE_DIR) -fbranch-probabilities
 endif
 
 ifeq ($(PSG_ENGINE), mame_sn76489)

@@ -59,7 +59,7 @@ typedef struct
     uint8_t *data_readmap[64];
     uint8_t *tile_rom;
     uint32_t tile_rom_loaded;
-    uint64_t *tile_row_cache;
+    uint8_t *tile_row_cache;
     uint32_t tile_cache_count;
     uint8_t tile_cache_dirty;
     uint8_t *sprite_rom;
@@ -115,7 +115,7 @@ int system1_alloc(void)
     s1.videoram = xcalloc(SYSTEM1_VRAM_SIZE, 1);
     s1.opcode_rom = xcalloc(SYSTEM1_MAIN_ROM_SIZE, 1);
     s1.tile_rom = xcalloc(SYSTEM1_TILE_ROM_SIZE, 1);
-    s1.tile_row_cache = (uint64_t *)calloc((SYSTEM1_TILE_ROM_SIZE / 24u) * 8u, sizeof(uint64_t));
+    s1.tile_row_cache = xcalloc((SYSTEM1_TILE_ROM_SIZE / 24u) * 8u * 8u, 1);
     s1.sprite_rom = xcalloc(SYSTEM1_SPRITE_ROM_SIZE, 1);
     s1.sound_rom = xcalloc(SYSTEM1_SOUND_ROM_SIZE, 1);
     s1.sound_ram = xcalloc(SYSTEM1_SOUND_RAM_SIZE, 1);
@@ -838,15 +838,13 @@ static void system1_rebuild_tile_cache(void)
             uint8_t p0 = s1.tile_rom[row + 0u * plane_stride];
             uint8_t p1 = s1.tile_rom[row + 1u * plane_stride];
             uint8_t p2 = s1.tile_rom[row + 2u * plane_stride];
-            uint64_t packed = 0;
+            uint8_t *dst = s1.tile_row_cache + ((code * 8u + rownum) * 8u);
             int x;
             for (x = 0; x < 8; x++)
             {
                 uint8_t mask = (uint8_t)(0x80u >> x);
-                uint8_t pix = (uint8_t)(((p0 & mask) ? 4 : 0) | ((p1 & mask) ? 2 : 0) | ((p2 & mask) ? 1 : 0));
-                packed = (packed << 8) | pix;
+                dst[x] = (uint8_t)(((p0 & mask) ? 4 : 0) | ((p1 & mask) ? 2 : 0) | ((p2 & mask) ? 1 : 0));
             }
-            s1.tile_row_cache[code * 8u + rownum] = packed;
         }
     }
 
@@ -854,23 +852,26 @@ static void system1_rebuild_tile_cache(void)
     s1.tile_cache_dirty = 0;
 }
 
-static inline uint16_t tilemap_pixel_from_offset(uint32_t off, int x, int y)
+static inline void tilemap_row_from_offset(uint32_t off, uint32_t y, uint16_t *base, const uint8_t **rowpix)
 {
-    uint16_t tiledata = (uint16_t)s1.videoram[off] | ((uint16_t)s1.videoram[off + 1u] << 8);
+    uint16_t tiledata = (uint16_t)((uint16_t)s1.videoram[off] | (uint16_t)((uint16_t)s1.videoram[off + 1u] << 8));
     uint16_t code = (uint16_t)(((tiledata >> 4) & 0x0800) | (tiledata & 0x07ff));
     uint32_t tile_count = s1.tile_cache_count ? s1.tile_cache_count : 1u;
-    uint64_t rowbits;
-    uint8_t pix;
 
     if ((uint32_t)code >= tile_count)
         code = (uint16_t)((uint32_t)code % tile_count);
-    rowbits = s1.tile_row_cache[(uint32_t)code * 8u + ((uint32_t)y & 7u)];
-    pix = (uint8_t)(rowbits >> ((7u - ((uint32_t)x & 7u)) * 8u));
+
+    *rowpix = s1.tile_row_cache + (((uint32_t)code * 8u + (y & 7u)) * 8u);
     /* MAME tilemap pixmaps retain the tile color bits even when the
      * pixel pen is transparent.  The mixer checks transparency with
      * (pix & 7) == 0, but if the PROM still selects that layer the
      * color bits participate in the palette lookup. */
-    return (uint16_t)((((tiledata >> 5) & 0xffu) << 3) | pix);
+    *base = (uint16_t)(((tiledata >> 5) & 0xffu) << 3);
+}
+
+static inline uint16_t tilemap_pixel_from_row(uint16_t base, const uint8_t *rowpix, uint32_t x)
+{
+    return (uint16_t)(base | rowpix[x & 7u]);
 }
 
 static void draw_sprites(void)
@@ -880,8 +881,8 @@ static void draw_sprites(void)
     for (spr = 0; spr < 32; spr++)
     {
         const uint8_t *sd = &s1.spriteram[spr * 0x10];
-        uint16_t srcaddr = (uint16_t)sd[6] | ((uint16_t)sd[7] << 8);
-        uint16_t stride = (uint16_t)sd[4] | ((uint16_t)sd[5] << 8);
+        uint16_t srcaddr = (uint16_t)((uint16_t)sd[6] | (uint16_t)((uint16_t)sd[7] << 8));
+        uint16_t stride = (uint16_t)((uint16_t)sd[4] | (uint16_t)((uint16_t)sd[5] << 8));
         uint8_t bank = (uint8_t)(((sd[3] & 0x80) >> 7) | ((sd[3] & 0x40) >> 5) | ((sd[3] & 0x20) >> 3));
         int xstart = ((int)((uint16_t)sd[2] | ((uint16_t)sd[3] << 8)) & 0x1ff);
         int top = (int)sd[0] + 1;
@@ -936,9 +937,365 @@ static void draw_sprites(void)
     }
 }
 
+static void system1_clear_viewport(void)
+{
+    uint32_t y;
+    uint32_t clear_w;
+    uint32_t clear_h;
+
+    if (!bitmap.data || !bitmap.pitch || bitmap.viewport.w <= 0 || bitmap.viewport.h <= 0)
+        return;
+    clear_w = (uint32_t)bitmap.viewport.w;
+    clear_h = (uint32_t)bitmap.viewport.h;
+    if (clear_w > bitmap.width) clear_w = bitmap.width;
+    if (clear_h > bitmap.height) clear_h = bitmap.height;
+
+#ifdef MULTIREXZ80_RENDER_32BPP
+    for (y = 0; y < clear_h; y++)
+        memset(bitmap.data + (size_t)y * bitmap.pitch, 0, (size_t)clear_w * sizeof(uint32_t));
+#else
+    for (y = 0; y < clear_h; y++)
+        memset(bitmap.data + (size_t)y * bitmap.pitch, 0, (size_t)clear_w * sizeof(uint16_t));
+#endif
+}
+
+
+static void system1_render_fast_none(void)
+{
+    int y, x;
+    uint32_t pages = s1.tilemap_pages ? s1.tilemap_pages : 2u;
+    uint32_t page_mask = pages - 1u;
+    int pages_power_of_two = ((pages & page_mask) == 0);
+    int fgpage = (s1.video_type == 2) ? 0 : 1;
+    uint32_t fgpage_norm = pages_power_of_two ? ((uint32_t)fgpage & page_mask) : ((uint32_t)fgpage % pages);
+
+    for (y = 0; y < SYSTEM1_VISIBLE_HEIGHT; y++)
+    {
+        int screen_y = y;
+        int bgyscroll, xscroll;
+        uint32_t fgy = (uint32_t)screen_y & 0xffu;
+        uint32_t fg_row_base = (fgpage_norm << 11) | (((fgy >> 3) & 0x1fu) << 6);
+        uint32_t fg_pix_y = fgy & 7u;
+        uint32_t bg_pix_y, bg_ty_base;
+        uint32_t fg_last_col = 0xffffffffu;
+        uint32_t bg_last_key = 0xffffffffu;
+        uint16_t fg_base = 0, bg_base = 0;
+        const uint8_t *fg_rowpix = NULL, *bg_rowpix = NULL;
+        const uint16_t *sprite_row = s1.sprite_line + (size_t)y * SYSTEM1_RAW_WIDTH;
+#ifdef MULTIREXZ80_RENDER_32BPP
+        uint32_t *dst = (uint32_t *)(void *)(bitmap.data + (size_t)y * bitmap.pitch);
+#else
+        uint16_t *dst = (uint16_t *)(void *)(bitmap.data + (size_t)y * bitmap.pitch);
+#endif
+
+        if (s1.video_type == 2)
+        {
+            bgyscroll = s1.videoram[0x07ba];
+            if (s1.rowscroll)
+            {
+                uint32_t rowoffs = 0x07c0u + ((((uint32_t)screen_y >> 3) & 0x1f) * 2u);
+                xscroll = (((int)((uint16_t)s1.videoram[rowoffs] | ((uint16_t)s1.videoram[rowoffs + 1] << 8))) & 0x1ff) - 512 + 10;
+            }
+            else
+            {
+                xscroll = (((int)((uint16_t)s1.videoram[0x07c0] | ((uint16_t)s1.videoram[0x07c1] << 8))) & 0x1ff) - 512 + 10;
+            }
+        }
+        else
+        {
+            bgyscroll = s1.videoram[0x0fbd];
+            xscroll = (int)(int16_t)(((uint16_t)s1.videoram[0x0ffc] | ((uint16_t)s1.videoram[0x0ffd] << 8)) + 28);
+        }
+
+        {
+            uint32_t bgy = (uint32_t)((screen_y + bgyscroll) & 0x1ff);
+            bg_pix_y = bgy & 7u;
+            bg_ty_base = ((bgy >> 3) & 0x1fu) << 6;
+        }
+
+        for (x = 0; x < SYSTEM1_RAW_WIDTH; x += 2)
+        {
+            int bgpage = 0;
+            int bgx;
+            int out_x = x >> 1;
+            uint32_t bgpage_norm;
+            uint32_t bg_key;
+            uint32_t fgx = (uint32_t)out_x & 0xffu;
+            uint32_t fg_col = (fgx >> 3) & 0x1fu;
+            uint16_t bg, fg, sp, pen;
+            uint8_t lookup_index, lookup_value;
+
+            if (fg_col != fg_last_col)
+            {
+                uint32_t fg_off = fg_row_base | (fg_col << 1);
+                tilemap_row_from_offset(fg_off, fg_pix_y, &fg_base, &fg_rowpix);
+                fg_last_col = fg_col;
+            }
+
+            bgx = ((x - xscroll) / 2) & 0x1ff;
+            if (s1.video_type == 2)
+            {
+                int quad = ((((screen_y + bgyscroll) & 0x1ff) >> 8) * 2) + (bgx >> 8);
+                bgpage = s1.videoram[0x0740 + (quad * 2)] & 7;
+            }
+            bgpage_norm = pages_power_of_two ? ((uint32_t)bgpage & page_mask) : ((uint32_t)bgpage % pages);
+            bg_key = (bgpage_norm << 5) | (((uint32_t)bgx >> 3) & 0x1fu);
+            if (bg_key != bg_last_key)
+            {
+                uint32_t bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                tilemap_row_from_offset(bg_off, bg_pix_y, &bg_base, &bg_rowpix);
+                bg_last_key = bg_key;
+            }
+
+            bg = tilemap_pixel_from_row(bg_base, bg_rowpix, (uint32_t)bgx);
+            fg = tilemap_pixel_from_row(fg_base, fg_rowpix, fgx);
+            sp = sprite_row[(uint32_t)x];
+            lookup_index = (uint8_t)((((sp & 0x0f) == 0) << 0) |
+                           (((fg & 0x07) == 0) << 1) |
+                           (((fg >> 9) & 0x03) << 2) |
+                           (((bg & 0x07) == 0) << 4) |
+                           (((bg >> 9) & 0x03) << 5));
+            lookup_value = s1.prom[lookup_index];
+            if (!(lookup_value & 4) && (sp & 0x0f))
+                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
+            switch (lookup_value & 3)
+            {
+                default:
+                case 0: pen = (uint16_t)(0x000 | (sp & 0x1ff)); break;
+                case 1: pen = (uint16_t)(0x200 | (fg & 0x1ff)); break;
+                case 2:
+                case 3: pen = (uint16_t)(0x400 | (bg & 0x1ff)); break;
+            }
+#ifdef MULTIREXZ80_RENDER_32BPP
+            dst[out_x] = system1_pen(pen);
+#else
+            dst[out_x] = (uint16_t)system1_pen(pen);
+#endif
+        }
+    }
+}
+static void system1_render_fast_cw(void)
+{
+    int y, x;
+    uint32_t pages = s1.tilemap_pages ? s1.tilemap_pages : 2u;
+    uint32_t page_mask = pages - 1u;
+    int pages_power_of_two = ((pages & page_mask) == 0);
+    int fgpage = (s1.video_type == 2) ? 0 : 1;
+    uint32_t fgpage_norm = pages_power_of_two ? ((uint32_t)fgpage & page_mask) : ((uint32_t)fgpage % pages);
+
+    for (y = 0; y < SYSTEM1_VISIBLE_HEIGHT; y++)
+    {
+        int screen_y = y;
+        int bgyscroll, xscroll;
+        uint32_t fgy = (uint32_t)screen_y & 0xffu;
+        uint32_t fg_row_base = (fgpage_norm << 11) | (((fgy >> 3) & 0x1fu) << 6);
+        uint32_t fg_pix_y = fgy & 7u;
+        uint32_t bg_pix_y, bg_ty_base;
+        uint32_t fg_last_col = 0xffffffffu;
+        uint32_t bg_last_key = 0xffffffffu;
+        uint16_t fg_base = 0, bg_base = 0;
+        const uint8_t *fg_rowpix = NULL, *bg_rowpix = NULL;
+        const uint16_t *sprite_row = s1.sprite_line + (size_t)y * SYSTEM1_RAW_WIDTH;
+        if (s1.video_type == 2)
+        {
+            bgyscroll = s1.videoram[0x07ba];
+            if (s1.rowscroll)
+            {
+                uint32_t rowoffs = 0x07c0u + ((((uint32_t)screen_y >> 3) & 0x1f) * 2u);
+                xscroll = (((int)((uint16_t)s1.videoram[rowoffs] | ((uint16_t)s1.videoram[rowoffs + 1] << 8))) & 0x1ff) - 512 + 10;
+            }
+            else
+            {
+                xscroll = (((int)((uint16_t)s1.videoram[0x07c0] | ((uint16_t)s1.videoram[0x07c1] << 8))) & 0x1ff) - 512 + 10;
+            }
+        }
+        else
+        {
+            bgyscroll = s1.videoram[0x0fbd];
+            xscroll = (int)(int16_t)(((uint16_t)s1.videoram[0x0ffc] | ((uint16_t)s1.videoram[0x0ffd] << 8)) + 28);
+        }
+
+        {
+            uint32_t bgy = (uint32_t)((screen_y + bgyscroll) & 0x1ff);
+            bg_pix_y = bgy & 7u;
+            bg_ty_base = ((bgy >> 3) & 0x1fu) << 6;
+        }
+
+        for (x = 0; x < SYSTEM1_RAW_WIDTH; x += 2)
+        {
+            int bgpage = 0;
+            int bgx;
+            int out_x = x >> 1;
+            uint32_t bgpage_norm;
+            uint32_t bg_key;
+            uint32_t fgx = (uint32_t)out_x & 0xffu;
+            uint32_t fg_col = (fgx >> 3) & 0x1fu;
+            uint16_t bg, fg, sp, pen;
+            uint8_t lookup_index, lookup_value;
+
+            if (fg_col != fg_last_col)
+            {
+                uint32_t fg_off = fg_row_base | (fg_col << 1);
+                tilemap_row_from_offset(fg_off, fg_pix_y, &fg_base, &fg_rowpix);
+                fg_last_col = fg_col;
+            }
+
+            bgx = ((x - xscroll) / 2) & 0x1ff;
+            if (s1.video_type == 2)
+            {
+                int quad = ((((screen_y + bgyscroll) & 0x1ff) >> 8) * 2) + (bgx >> 8);
+                bgpage = s1.videoram[0x0740 + (quad * 2)] & 7;
+            }
+            bgpage_norm = pages_power_of_two ? ((uint32_t)bgpage & page_mask) : ((uint32_t)bgpage % pages);
+            bg_key = (bgpage_norm << 5) | (((uint32_t)bgx >> 3) & 0x1fu);
+            if (bg_key != bg_last_key)
+            {
+                uint32_t bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                tilemap_row_from_offset(bg_off, bg_pix_y, &bg_base, &bg_rowpix);
+                bg_last_key = bg_key;
+            }
+
+            bg = tilemap_pixel_from_row(bg_base, bg_rowpix, (uint32_t)bgx);
+            fg = tilemap_pixel_from_row(fg_base, fg_rowpix, fgx);
+            sp = sprite_row[(uint32_t)x];
+            lookup_index = (uint8_t)((((sp & 0x0f) == 0) << 0) |
+                           (((fg & 0x07) == 0) << 1) |
+                           (((fg >> 9) & 0x03) << 2) |
+                           (((bg & 0x07) == 0) << 4) |
+                           (((bg >> 9) & 0x03) << 5));
+            lookup_value = s1.prom[lookup_index];
+            if (!(lookup_value & 4) && (sp & 0x0f))
+                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
+            switch (lookup_value & 3)
+            {
+                default:
+                case 0: pen = (uint16_t)(0x000 | (sp & 0x1ff)); break;
+                case 1: pen = (uint16_t)(0x200 | (fg & 0x1ff)); break;
+                case 2:
+                case 3: pen = (uint16_t)(0x400 | (bg & 0x1ff)); break;
+            }
+#ifdef MULTIREXZ80_RENDER_32BPP
+            ((uint32_t *)(void *)(bitmap.data + (size_t)out_x * bitmap.pitch))[SYSTEM1_VISIBLE_HEIGHT - 1 - y] = system1_pen(pen);
+#else
+            ((uint16_t *)(void *)(bitmap.data + (size_t)out_x * bitmap.pitch))[SYSTEM1_VISIBLE_HEIGHT - 1 - y] = (uint16_t)system1_pen(pen);
+#endif
+        }
+    }
+}
+
+static void system1_render_fast_ccw(void)
+{
+    int y, x;
+    uint32_t pages = s1.tilemap_pages ? s1.tilemap_pages : 2u;
+    uint32_t page_mask = pages - 1u;
+    int pages_power_of_two = ((pages & page_mask) == 0);
+    int fgpage = (s1.video_type == 2) ? 0 : 1;
+    uint32_t fgpage_norm = pages_power_of_two ? ((uint32_t)fgpage & page_mask) : ((uint32_t)fgpage % pages);
+
+    for (y = 0; y < SYSTEM1_VISIBLE_HEIGHT; y++)
+    {
+        int screen_y = y;
+        int bgyscroll, xscroll;
+        uint32_t fgy = (uint32_t)screen_y & 0xffu;
+        uint32_t fg_row_base = (fgpage_norm << 11) | (((fgy >> 3) & 0x1fu) << 6);
+        uint32_t fg_pix_y = fgy & 7u;
+        uint32_t bg_pix_y, bg_ty_base;
+        uint32_t fg_last_col = 0xffffffffu;
+        uint32_t bg_last_key = 0xffffffffu;
+        uint16_t fg_base = 0, bg_base = 0;
+        const uint8_t *fg_rowpix = NULL, *bg_rowpix = NULL;
+        const uint16_t *sprite_row = s1.sprite_line + (size_t)y * SYSTEM1_RAW_WIDTH;
+        if (s1.video_type == 2)
+        {
+            bgyscroll = s1.videoram[0x07ba];
+            if (s1.rowscroll)
+            {
+                uint32_t rowoffs = 0x07c0u + ((((uint32_t)screen_y >> 3) & 0x1f) * 2u);
+                xscroll = (((int)((uint16_t)s1.videoram[rowoffs] | ((uint16_t)s1.videoram[rowoffs + 1] << 8))) & 0x1ff) - 512 + 10;
+            }
+            else
+            {
+                xscroll = (((int)((uint16_t)s1.videoram[0x07c0] | ((uint16_t)s1.videoram[0x07c1] << 8))) & 0x1ff) - 512 + 10;
+            }
+        }
+        else
+        {
+            bgyscroll = s1.videoram[0x0fbd];
+            xscroll = (int)(int16_t)(((uint16_t)s1.videoram[0x0ffc] | ((uint16_t)s1.videoram[0x0ffd] << 8)) + 28);
+        }
+
+        {
+            uint32_t bgy = (uint32_t)((screen_y + bgyscroll) & 0x1ff);
+            bg_pix_y = bgy & 7u;
+            bg_ty_base = ((bgy >> 3) & 0x1fu) << 6;
+        }
+
+        for (x = 0; x < SYSTEM1_RAW_WIDTH; x += 2)
+        {
+            int bgpage = 0;
+            int bgx;
+            int out_x = x >> 1;
+            uint32_t bgpage_norm;
+            uint32_t bg_key;
+            uint32_t fgx = (uint32_t)out_x & 0xffu;
+            uint32_t fg_col = (fgx >> 3) & 0x1fu;
+            uint16_t bg, fg, sp, pen;
+            uint8_t lookup_index, lookup_value;
+
+            if (fg_col != fg_last_col)
+            {
+                uint32_t fg_off = fg_row_base | (fg_col << 1);
+                tilemap_row_from_offset(fg_off, fg_pix_y, &fg_base, &fg_rowpix);
+                fg_last_col = fg_col;
+            }
+
+            bgx = ((x - xscroll) / 2) & 0x1ff;
+            if (s1.video_type == 2)
+            {
+                int quad = ((((screen_y + bgyscroll) & 0x1ff) >> 8) * 2) + (bgx >> 8);
+                bgpage = s1.videoram[0x0740 + (quad * 2)] & 7;
+            }
+            bgpage_norm = pages_power_of_two ? ((uint32_t)bgpage & page_mask) : ((uint32_t)bgpage % pages);
+            bg_key = (bgpage_norm << 5) | (((uint32_t)bgx >> 3) & 0x1fu);
+            if (bg_key != bg_last_key)
+            {
+                uint32_t bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                tilemap_row_from_offset(bg_off, bg_pix_y, &bg_base, &bg_rowpix);
+                bg_last_key = bg_key;
+            }
+
+            bg = tilemap_pixel_from_row(bg_base, bg_rowpix, (uint32_t)bgx);
+            fg = tilemap_pixel_from_row(fg_base, fg_rowpix, fgx);
+            sp = sprite_row[(uint32_t)x];
+            lookup_index = (uint8_t)((((sp & 0x0f) == 0) << 0) |
+                           (((fg & 0x07) == 0) << 1) |
+                           (((fg >> 9) & 0x03) << 2) |
+                           (((bg & 0x07) == 0) << 4) |
+                           (((bg >> 9) & 0x03) << 5));
+            lookup_value = s1.prom[lookup_index];
+            if (!(lookup_value & 4) && (sp & 0x0f))
+                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
+            switch (lookup_value & 3)
+            {
+                default:
+                case 0: pen = (uint16_t)(0x000 | (sp & 0x1ff)); break;
+                case 1: pen = (uint16_t)(0x200 | (fg & 0x1ff)); break;
+                case 2:
+                case 3: pen = (uint16_t)(0x400 | (bg & 0x1ff)); break;
+            }
+#ifdef MULTIREXZ80_RENDER_32BPP
+            ((uint32_t *)(void *)(bitmap.data + (size_t)(SYSTEM1_VISIBLE_WIDTH - 1 - out_x) * bitmap.pitch))[y] = system1_pen(pen);
+#else
+            ((uint16_t *)(void *)(bitmap.data + (size_t)(SYSTEM1_VISIBLE_WIDTH - 1 - out_x) * bitmap.pitch))[y] = (uint16_t)system1_pen(pen);
+#endif
+        }
+    }
+}
+
 static void system1_render(void)
 {
     int y, x;
+    int fast_bounds;
     if (!bitmap.data) return;
     bitmap.viewport.x = 0;
     bitmap.viewport.y = 0;
@@ -946,10 +1303,13 @@ static void system1_render(void)
     bitmap.viewport.h = (s1.rotate != SYSTEM1_ROTATE_NONE) ? SYSTEM1_VISIBLE_WIDTH : SYSTEM1_VISIBLE_HEIGHT;
     bitmap.viewport.changed = 1;
 
-    memset(bitmap.data, 0, bitmap.pitch * bitmap.height);
-
     if (s1.video_mode & 0x10)
+    {
+        system1_clear_viewport();
         return;
+    }
+
+    fast_bounds = ((int32_t)bitmap.width >= bitmap.viewport.w && (int32_t)bitmap.height >= bitmap.viewport.h);
 
     if (s1.tile_cache_dirty || !s1.tile_cache_count)
         system1_rebuild_tile_cache();
@@ -957,6 +1317,24 @@ static void system1_render(void)
         system1_rebuild_pen_cache();
 
     draw_sprites();
+    if (fast_bounds)
+    {
+        if (s1.rotate == SYSTEM1_ROTATE_NONE)
+        {
+            system1_render_fast_none();
+            return;
+        }
+        if (s1.rotate == SYSTEM1_ROTATE_CW)
+        {
+            system1_render_fast_cw();
+            return;
+        }
+        if (s1.rotate == SYSTEM1_ROTATE_CCW)
+        {
+            system1_render_fast_ccw();
+            return;
+        }
+    }
     {
         uint32_t pages = s1.tilemap_pages ? s1.tilemap_pages : 2u;
         uint32_t page_mask = pages - 1u;
@@ -998,17 +1376,31 @@ static void system1_render(void)
                 bg_ty_base = ((bgy >> 3) & 0x1fu) << 6;
             }
 
+            {
+                uint32_t fg_last_col = 0xffffffffu;
+                uint32_t bg_last_key = 0xffffffffu;
+                uint16_t fg_base = 0, bg_base = 0;
+                const uint8_t *fg_rowpix = NULL, *bg_rowpix = NULL;
+                const uint16_t *sprite_row = s1.sprite_line + (size_t)y * SYSTEM1_RAW_WIDTH;
+
             for (x = 0; x < SYSTEM1_RAW_WIDTH; x += 2)
             {
                 int bgpage = 0;
                 int bgx;
                 int out_x = x >> 1;
                 uint32_t bgpage_norm;
-                uint32_t bg_off;
+                uint32_t bg_key;
                 uint32_t fgx = (uint32_t)out_x & 0xffu;
-                uint32_t fg_off = fg_row_base | (((fgx >> 3) & 0x1fu) << 1);
+                uint32_t fg_col = (fgx >> 3) & 0x1fu;
                 uint16_t bg, fg, sp, pen;
                 uint8_t lookup_index, lookup_value;
+
+                if (fg_col != fg_last_col)
+                {
+                    uint32_t fg_off = fg_row_base | (fg_col << 1);
+                    tilemap_row_from_offset(fg_off, fg_pix_y, &fg_base, &fg_rowpix);
+                    fg_last_col = fg_col;
+                }
 
                 bgx = ((x - xscroll) / 2) & 0x1ff;
                 if (s1.video_type == 2)
@@ -1017,11 +1409,17 @@ static void system1_render(void)
                     bgpage = s1.videoram[0x0740 + (quad * 2)] & 7;
                 }
                 bgpage_norm = pages_power_of_two ? ((uint32_t)bgpage & page_mask) : ((uint32_t)bgpage % pages);
-                bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                bg_key = (bgpage_norm << 5) | (((uint32_t)bgx >> 3) & 0x1fu);
+                if (bg_key != bg_last_key)
+                {
+                    uint32_t bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                    tilemap_row_from_offset(bg_off, bg_pix_y, &bg_base, &bg_rowpix);
+                    bg_last_key = bg_key;
+                }
 
-                bg = tilemap_pixel_from_offset(bg_off, bgx, (int)bg_pix_y);
-                fg = tilemap_pixel_from_offset(fg_off, (int)fgx, (int)fg_pix_y);
-                sp = s1.sprite_line[(size_t)y * SYSTEM1_RAW_WIDTH + (uint32_t)x];
+                bg = tilemap_pixel_from_row(bg_base, bg_rowpix, (uint32_t)bgx);
+                fg = tilemap_pixel_from_row(fg_base, fg_rowpix, fgx);
+                sp = sprite_row[(uint32_t)x];
                 lookup_index = (uint8_t)((((sp & 0x0f) == 0) << 0) |
                                (((fg & 0x07) == 0) << 1) |
                                (((fg >> 9) & 0x03) << 2) |
@@ -1040,27 +1438,63 @@ static void system1_render(void)
                 }
                 {
                     uint32_t out = system1_pen(pen);
-                    int dx = out_x;
-                    int dy = y;
-                    if (s1.rotate == SYSTEM1_ROTATE_CW)
-                    {
-                        dx = SYSTEM1_VISIBLE_HEIGHT - 1 - y;
-                        dy = out_x;
-                    }
-                    else if (s1.rotate == SYSTEM1_ROTATE_CCW)
-                    {
-                        dx = y;
-                        dy = SYSTEM1_VISIBLE_WIDTH - 1 - out_x;
-                    }
-                    if (dx >= 0 && dy >= 0 && dx < (int)bitmap.width && dy < (int)bitmap.height)
-                    {
 #ifdef MULTIREXZ80_RENDER_32BPP
-                        ((uint32_t *)(void *)(bitmap.data + (size_t)dy * bitmap.pitch))[dx] = out;
-#else
-                        ((uint16_t *)(void *)(bitmap.data + (size_t)dy * bitmap.pitch))[dx] = (uint16_t)out;
-#endif
+                    if (fast_bounds)
+                    {
+                        if (s1.rotate == SYSTEM1_ROTATE_NONE)
+                            ((uint32_t *)(void *)(bitmap.data + (size_t)y * bitmap.pitch))[out_x] = out;
+                        else if (s1.rotate == SYSTEM1_ROTATE_CW)
+                            ((uint32_t *)(void *)(bitmap.data + (size_t)out_x * bitmap.pitch))[SYSTEM1_VISIBLE_HEIGHT - 1 - y] = out;
+                        else
+                            ((uint32_t *)(void *)(bitmap.data + (size_t)(SYSTEM1_VISIBLE_WIDTH - 1 - out_x) * bitmap.pitch))[y] = out;
                     }
+                    else
+                    {
+                        int dx = out_x;
+                        int dy = y;
+                        if (s1.rotate == SYSTEM1_ROTATE_CW)
+                        {
+                            dx = SYSTEM1_VISIBLE_HEIGHT - 1 - y;
+                            dy = out_x;
+                        }
+                        else if (s1.rotate == SYSTEM1_ROTATE_CCW)
+                        {
+                            dx = y;
+                            dy = SYSTEM1_VISIBLE_WIDTH - 1 - out_x;
+                        }
+                        if (dx >= 0 && dy >= 0 && dx < (int)bitmap.width && dy < (int)bitmap.height)
+                            ((uint32_t *)(void *)(bitmap.data + (size_t)dy * bitmap.pitch))[dx] = out;
+                    }
+#else
+                    if (fast_bounds)
+                    {
+                        if (s1.rotate == SYSTEM1_ROTATE_NONE)
+                            ((uint16_t *)(void *)(bitmap.data + (size_t)y * bitmap.pitch))[out_x] = (uint16_t)out;
+                        else if (s1.rotate == SYSTEM1_ROTATE_CW)
+                            ((uint16_t *)(void *)(bitmap.data + (size_t)out_x * bitmap.pitch))[SYSTEM1_VISIBLE_HEIGHT - 1 - y] = (uint16_t)out;
+                        else
+                            ((uint16_t *)(void *)(bitmap.data + (size_t)(SYSTEM1_VISIBLE_WIDTH - 1 - out_x) * bitmap.pitch))[y] = (uint16_t)out;
+                    }
+                    else
+                    {
+                        int dx = out_x;
+                        int dy = y;
+                        if (s1.rotate == SYSTEM1_ROTATE_CW)
+                        {
+                            dx = SYSTEM1_VISIBLE_HEIGHT - 1 - y;
+                            dy = out_x;
+                        }
+                        else if (s1.rotate == SYSTEM1_ROTATE_CCW)
+                        {
+                            dx = y;
+                            dy = SYSTEM1_VISIBLE_WIDTH - 1 - out_x;
+                        }
+                        if (dx >= 0 && dy >= 0 && dx < (int)bitmap.width && dy < (int)bitmap.height)
+                            ((uint16_t *)(void *)(bitmap.data + (size_t)dy * bitmap.pitch))[dx] = (uint16_t)out;
+                    }
+#endif
                 }
+            }
             }
         }
     }

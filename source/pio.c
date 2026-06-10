@@ -154,7 +154,20 @@ void pio_ctrl_w(uint8_t data)
        (th_level[0] == PIN_LVL_LO)
       )
   {
-    sms.hlatch = hc_256[system_hcounter_index()];
+    {
+      int32_t idx = system_hcounter_index();
+      /* The TH low->high HCounter latch samples a few master cycles after
+       * the CPU-visible OUT has started.  This matters at the end of the
+       * line when software first synchronizes on HCounter $F1 and then
+       * immediately flips TH to latch an IRQ edge.  Keep the normal latch
+       * phase for ordinary polling, but apply the late sample in that
+       * edge case. */
+      if (((sms.console == CONSOLE_SMS) || (sms.console == CONSOLE_SMS2)) &&
+          (sms.hlatch == 0xF1) && (idx >= 190))
+        idx += 4;
+      if (idx >= CYCLES_PER_LINE) idx = CYCLES_PER_LINE - 1;
+      sms.hlatch = hc_256[idx];
+    }
   }
 
   /* update port value */

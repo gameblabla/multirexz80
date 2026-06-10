@@ -45,6 +45,16 @@
 #define CONFIG_BUTTON_SEVEN 15
 #define CONFIG_BUTTON_EIGHT 16
 #define CONFIG_BUTTON_NINE 17
+/* Arcade and keyboard overlay mappings.  These live above the historical
+ * Coleco keypad range so old 19-entry config files remain readable; missing
+ * values simply keep the defaults from sdl12_common. */
+#define CONFIG_BUTTON_ARCADE_COIN1 19
+#define CONFIG_BUTTON_ARCADE_COIN2 20
+#define CONFIG_BUTTON_ARCADE_START1 21
+#define CONFIG_BUTTON_ARCADE_START2 22
+#define CONFIG_BUTTON_ARCADE_SERVICE 23
+#define CONFIG_BUTTON_ARCADE_TEST 24
+#define CONFIG_BUTTON_VKBD 25
 
 extern SDL_Surface* sms_bitmap;
 

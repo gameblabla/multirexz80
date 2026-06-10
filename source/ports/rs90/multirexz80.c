@@ -35,6 +35,9 @@ static gamedata_t gdata;
 t_config option;
 
 static SDL_Surface* sdl_screen, *backbuffer;
+#ifdef SCALE2X_UPSCALER
+static SDL_Surface *scale2x_buf;
+#endif
 SDL_Surface *sms_bitmap;
 
 static char home_path[256];
@@ -60,6 +63,9 @@ static void video_update(void)
 
 	multirexz80_sdl12_get_active_view(&view);
 
+	/* RS-90 panel mode is the native 240x160 target.  If Scale2x is enabled
+	 * through config/fullscreen mode 2, keep the final software-scaled image on
+	 * that native surface instead of asking SDL/IPU for a source-sized mode. */
 	target_w = (option.fullscreen == 0) ? (uint32_t)view.w : HOST_WIDTH_RESOLUTION;
 	target_h = (option.fullscreen == 0) ? (uint32_t)view.h : HOST_HEIGHT_RESOLUTION;
 	if (target_h == 0) target_h = VIDEO_HEIGHT_SMS;
@@ -79,37 +85,76 @@ static void video_update(void)
 	src.h = (Uint16)view.h;
 
 	SDL_FillRect(sdl_screen, NULL, 0);
-	if (option.fullscreen == 0)
+	switch (option.fullscreen)
 	{
-		dst.x = (Sint16)((sdl_screen->w - src.w) / 2);
-		dst.y = (Sint16)((sdl_screen->h - src.h) / 2);
-		if (dst.x < 0) dst.x = 0;
-		if (dst.y < 0) dst.y = 0;
-		SDL_BlitSurface(sms_bitmap, &src, sdl_screen, &dst);
-	}
-	else
-	{
-		multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w, view.h);
-		if (SDL_MUSTLOCK(sdl_screen))
-		{
-			if (SDL_LockSurface(sdl_screen) < 0)
+		case 0:
+			dst.x = (Sint16)((sdl_screen->w - src.w) / 2);
+			dst.y = (Sint16)((sdl_screen->h - src.h) / 2);
+			if (dst.x < 0) dst.x = 0;
+			if (dst.y < 0) dst.y = 0;
+			SDL_BlitSurface(sms_bitmap, &src, sdl_screen, &dst);
+			break;
+
+		case 2:
+#ifdef SCALE2X_UPSCALER
+			if (scale2x_buf && view.w * 2 <= scale2x_buf->w && view.h * 2 <= scale2x_buf->h)
 			{
-				SDL_Flip(sdl_screen);
-				return;
+				scale2x((uint16_t *)sms_bitmap->pixels + view.y * view.pitch_pixels + view.x,
+				        (uint16_t *)scale2x_buf->pixels,
+				        sms_bitmap->pitch,
+				        scale2x_buf->pitch,
+				        view.w, view.h);
+#ifdef MULTIREXZ80_SCALE2X_TARGET_NATIVE
+				dst.x = 0;
+				dst.y = 0;
+				dst.w = (Uint16)sdl_screen->w;
+				dst.h = (Uint16)sdl_screen->h;
+#else
+				multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w * 2, view.h * 2);
+#endif
+				if (SDL_MUSTLOCK(sdl_screen))
+				{
+					if (SDL_LockSurface(sdl_screen) < 0)
+					{
+						SDL_Flip(sdl_screen);
+						return;
+					}
+					locked = 1;
+				}
+				screen_pitch = multirexz80_sdl12_surface_pitch_pixels(sdl_screen);
+				if (screen_pitch <= 0) screen_pitch = sdl_screen->w;
+				bitmap_scale(0, 0, view.w * 2, view.h * 2, dst.w, dst.h,
+				             scale2x_buf->pitch >> 1, screen_pitch - dst.w,
+				             (uint16_t * restrict)scale2x_buf->pixels,
+				             (uint16_t * restrict)sdl_screen->pixels + dst.x + dst.y * screen_pitch);
+				if (locked) { SDL_UnlockSurface(sdl_screen); locked = 0; }
 			}
-			locked = 1;
-		}
-		screen_pitch = multirexz80_sdl12_surface_pitch_pixels(sdl_screen);
-		if (screen_pitch <= 0) screen_pitch = sdl_screen->w;
-		bitmap_scale(view.x, view.y, view.w, view.h, dst.w, dst.h,
-		             view.pitch_pixels, screen_pitch - dst.w,
-		             (uint16_t * restrict)sms_bitmap->pixels,
-		             (uint16_t * restrict)sdl_screen->pixels + dst.x + dst.y * screen_pitch);
-		if (locked) SDL_UnlockSurface(sdl_screen);
+#endif
+			break;
+
+		case 1:
+		default:
+			multirexz80_sdl12_fit_rect(&dst, sdl_screen->w, sdl_screen->h, view.w, view.h);
+			if (SDL_MUSTLOCK(sdl_screen))
+			{
+				if (SDL_LockSurface(sdl_screen) < 0)
+				{
+					SDL_Flip(sdl_screen);
+					return;
+				}
+				locked = 1;
+			}
+			screen_pitch = multirexz80_sdl12_surface_pitch_pixels(sdl_screen);
+			if (screen_pitch <= 0) screen_pitch = sdl_screen->w;
+			bitmap_scale(view.x, view.y, view.w, view.h, dst.w, dst.h,
+			             view.pitch_pixels, screen_pitch - dst.w,
+			             (uint16_t * restrict)sms_bitmap->pixels,
+			             (uint16_t * restrict)sdl_screen->pixels + dst.x + dst.y * screen_pitch);
+			if (locked) { SDL_UnlockSurface(sdl_screen); locked = 0; }
+			break;
 	}
 	SDL_Flip(sdl_screen);
 }
-
 
 void smsp_state(uint8_t slot_number, uint8_t mode)
 {
@@ -673,6 +718,9 @@ static void Cleanup(void)
 	if (sdl_screen) SDL_FreeSurface(sdl_screen);
 	if (sms_bitmap) SDL_FreeSurface(sms_bitmap);
 	if (backbuffer) SDL_FreeSurface(backbuffer);
+#ifdef SCALE2X_UPSCALER
+	if (scale2x_buf) SDL_FreeSurface(scale2x_buf);
+#endif
 	if (bios.rom) free(bios.rom);
 	
 	// Deinitialize audio and video output
@@ -727,9 +775,14 @@ int main (int argc, char *argv[])
 	option.soundlevel = 2;
 	
 	config_load();
+#ifdef SCALE2X_UPSCALER
+	/* RS-90 has no display-mode menu, but keep a saved/manual Scale2x mode usable. */
+	if (option.fullscreen < 1 || option.fullscreen > 2) option.fullscreen = 1;
+#else
 	/* RS-90 has no display-mode menu; ignore stale saved values and always
 	 * use the 240x160 panel-sized output path. */
 	option.fullscreen = 1;
+#endif
 
 	option.console = 0;
 	
@@ -768,6 +821,9 @@ int main (int argc, char *argv[])
 	backbuffer = multirexz80_sdl12_create_rgb565_surface(HOST_WIDTH_RESOLUTION, HOST_HEIGHT_RESOLUTION);
 	font_drawing_set_target((uint16_t *)backbuffer->pixels, backbuffer->pitch >> 1, backbuffer->w, backbuffer->h);
 	sms_bitmap = multirexz80_sdl12_create_rgb565_surface(multirexz80_sdl12_bitmap_width(), multirexz80_sdl12_bitmap_height());
+#ifdef SCALE2X_UPSCALER
+	scale2x_buf = multirexz80_sdl12_create_rgb565_surface(multirexz80_sdl12_bitmap_width() * 2, multirexz80_sdl12_bitmap_height() * 2);
+#endif
 	
 	SDL_FillRect(sms_bitmap, NULL, 0 );
 	for(i=0;i<3;i++)

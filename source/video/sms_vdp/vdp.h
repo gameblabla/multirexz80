@@ -52,8 +52,20 @@ typedef struct
 {
     uint8_t vram[0x4000];
     uint8_t cram[0x40]; 
+    uint8_t cram_top[0x40];
+    uint8_t cram_top_next[0x40];
+    uint8_t cram_line_latch[0x40];
     uint8_t reg[0x10];
     uint8_t vscroll;
+    uint8_t hscroll;
+    uint8_t hscroll_top;
+    uint8_t hscroll_top_next;
+    uint8_t hscroll_top_next_valid;
+    uint8_t hscroll_top_next_armed;
+    uint8_t cram_top_valid;
+    uint8_t cram_top_next_valid;
+    uint8_t cram_top_next_armed;
+    uint8_t cram_top_capture_active;
     uint8_t status;
     uint8_t latch;
     uint8_t pending;
@@ -66,6 +78,8 @@ typedef struct
     uint8_t hint_pending;
     uint8_t spr_ovr;
     uint8_t bd;
+    uint8_t sprite_mode_latch;
+    uint8_t sprite_mode_draw;
     uint16_t lpf;
     uint16_t cram_latch;
     uint16_t addr;
@@ -75,7 +89,14 @@ typedef struct
     int32_t line;
     int32_t left;
     int32_t spr_col;
+    int32_t spr_col_line;
+    int32_t spr_col_cycle;
+    int32_t spr_ovr_line;
+    int32_t spr_ovr_cycle;
     int32_t mode;
+    uint8_t spr_col_pending;
+    uint8_t spr_ovr_pending;
+    uint8_t timed_render;
 } vdp_t;
 
 /* Global data */
@@ -89,6 +110,22 @@ extern void vdp_init(void);
 extern void vdp_shutdown(void);
 extern void vdp_reset(void);
 extern void viewport_check(void);
+extern void vdp_latch_sprite_mode(void);
+extern int vdp_timed_render_active(void);
+extern int vdp_gamegear_timing_active(void);
+extern int vdp_render_event_cycle(void);
+extern int vdp_hint_event_cycle(void);
+extern int vdp_xscroll_event_cycle(void);
+extern void vdp_latch_hscroll(void);
+extern void vdp_frame_scroll_latch_start(void);
+extern uint8_t vdp_vram_byte_for_bg_fetch(uint16_t address, int32_t fetch_cycle);
+extern uint8_t vdp_reg_byte_for_bg_fetch(uint8_t reg, int32_t fetch_cycle);
+extern void vdp_prepare_scanline(int32_t line, int skip_render);
+extern void vdp_render_scanline_if_due(void);
+extern void vdp_render_scanline_now(void);
+extern void vdp_request_sprite_collision(int32_t line, int32_t x);
+extern void vdp_request_sprite_overflow(int32_t line);
+extern void vdp_update_status_end_of_scanline(void);
 extern uint8_t vdp_counter_r(int32_t offset);
 extern uint8_t vdp_read(int32_t offset);
 extern void vdp_write(int32_t offset, uint8_t data);
