@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Athena attract-mode MAME renderer regression.
 
-This protects the TNK III/Athena side HUD/background composition.  MAME draws
-Athena through a 36x28 visible area; the playfield background must not bleed
-behind the left/right HUD strips during attract gameplay.
+This protects the TNK III/Athena side HUD composition.  MAME draws Athena
+through a 36x28 visible area; neither the playfield background nor off-playfield
+sprites may bleed behind the left/right HUD strips during attract gameplay.
 
 When --mame-video is supplied, the test also extracts the requested MAME frame
 and verifies that geometry/layering matches the MultiRex frame after palette
@@ -19,9 +19,9 @@ from pathlib import Path
 import subprocess
 from typing import Optional
 
-BASELINE_SHA256 = "ca16ed15c034afa5df4bd0c1eaf9473a5af13e54dc613c0a45fb1802e623234e"
-BASELINE_FRAMES = 951
-BASELINE_MAME_FRAME = 960
+BASELINE_SHA256 = "401facdd7988b225920f7f66aaf3b0283a2d36ca793f6f8bc5ddabcf60d1553a"
+BASELINE_FRAMES = 1791
+BASELINE_MAME_FRAME = 1800
 
 
 def sha256_file(path: Path) -> str:

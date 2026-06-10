@@ -2095,6 +2095,14 @@ static void snk_draw_sprite_tile(int sx, int sy, int size, uint16_t code, uint16
         uint16_t *idxdst = snk.frameidx + (size_t)y * SNK_PSYCHOS_FRAME_WIDTH + (size_t)xmin;
         for (x = xmin; x < xmax; x++, src++, dst++, idxdst++)
         {
+            /* MAME draws Athena through the TNK3 36x28 visible area, but the
+             * side HUD columns are not part of the sprite playfield.  The
+             * text/HUD layer is drawn after sprites; clipping sprite pixels
+             * here prevents off-playfield objects from bleeding over the
+             * black side meters while preserving the HUD graphics themselves. */
+            if (snk.game_type == SNK_GAME_ATHENA && (x < 16 || x >= 272))
+                continue;
+
             uint8_t pix = *src;
             if (snk.sprite_bpp == 3)
             {

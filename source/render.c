@@ -557,8 +557,8 @@ void render_init(void)
 		uint32_t out = 0;
 		for(x = 0; x < 8; x++)
 		{
-			out |= (j & (0x80 >> x)) ? (uint32_t)(8 << (x << 2)) : 0;
-			out |= (i & (0x80 >> x)) ? (uint32_t)(4 << (x << 2)) : 0;
+			out |= (j & (0x80 >> x)) ? (8u << (x << 2)) : 0;
+			out |= (i & (0x80 >> x)) ? (4u << (x << 2)) : 0;
 		}
 #if LSB_FIRST
 		bp_lut[(j << 8) | (i)] = out;

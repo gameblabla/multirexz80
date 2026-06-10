@@ -182,6 +182,15 @@ void system_frame(uint32_t skip_render)
 	if (sms.glasses_3d) skip_render = sms.wram[0x1ffb];
 
 	vdp_frame_scroll_latch_start();
+	vdp.vint_flag_raised = 0;
+	if (sms.display != DISPLAY_PAL || !(vdp.status & 0x80))
+		vdp.vint_flag_ack_seen = 0;
+	if (vdp2_ptr)
+	{
+		vdp2.vint_flag_raised = 0;
+		if (sms.display != DISPLAY_PAL || !(vdp2.status & 0x80))
+			vdp2.vint_flag_ack_seen = 0;
+	}
 
 	/* VDP register 9 is latched during VBLANK */
 	vdp.vscroll = vdp.reg[9];
@@ -207,6 +216,12 @@ void system_frame(uint32_t skip_render)
 		int timed_render = vdp_timed_render_active();
 
 		if (sms.console == CONSOLE_SYSTEME) systeme_vdp_set_line(vdp.line);
+		if ((sms.display == DISPLAY_PAL) && vdp.vint_flag_ack_seen && (vdp.line == 160))
+		{
+			vdp.status &= 0x7F;
+			vdp.vint_pending = 0;
+			vdp.vint_flag_ack_seen = 0;
+		}
 		iline = vdp.height;
 
 		/* Standard path renders at line start for compatibility.  When a
@@ -256,6 +271,7 @@ void system_frame(uint32_t skip_render)
 				if (vint_flag_target > z80_cycle_count)
 					z80_execute(vint_flag_target - z80_cycle_count);
 				vdp.status |= 0x80;
+				vdp.vint_flag_raised = 1;
 				vdp.vint_pending = 1;
 			}
 
@@ -283,10 +299,12 @@ void system_frame(uint32_t skip_render)
 		if(!timed_render && vdp.line == iline)
 		{
 			vdp.status |= 0x80;
+			vdp.vint_flag_raised = 1;
 			vdp.vint_pending = 1;
 			if (sms.console == CONSOLE_SYSTEME)
 			{
 				vdp2.status |= 0x80;
+				vdp2.vint_flag_raised = 1;
 				vdp2.vint_pending = 1;
 			}
 			if(vdp.reg[0x01] & 0x20)

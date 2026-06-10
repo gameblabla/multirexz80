@@ -192,9 +192,9 @@ test-ikari-title: $(PRGNAME)
 
 ATHENA_ATTRACT_ROM ?= roms/athena.zip
 ATHENA_ATTRACT_OUT_DIR ?= test-results/athena_attract
-ATHENA_ATTRACT_FRAMES ?= 951
+ATHENA_ATTRACT_FRAMES ?= 1791
 ATHENA_ATTRACT_MAME_VIDEO ?=
-ATHENA_ATTRACT_MAME_FRAME ?= 960
+ATHENA_ATTRACT_MAME_FRAME ?= 1800
 
 test-athena-attract: $(PRGNAME)
 	python3 source/tests/athena_attract_regression.py --binary ./$(PRGNAME) --rom "$(ATHENA_ATTRACT_ROM)" --out-dir $(ATHENA_ATTRACT_OUT_DIR) --frames $(ATHENA_ATTRACT_FRAMES) $(if $(ATHENA_ATTRACT_MAME_VIDEO),--mame-video "$(ATHENA_ATTRACT_MAME_VIDEO)" --mame-frame $(ATHENA_ATTRACT_MAME_FRAME),)
@@ -207,6 +207,14 @@ FLICKY_GAMEPLAY_MAME_FRAME ?= 1440
 
 test-flicky-gameplay: $(PRGNAME)
 	python3 source/tests/flicky_gameplay_regression.py --binary ./$(PRGNAME) --rom "$(FLICKY_GAMEPLAY_ROM)" --out-dir $(FLICKY_GAMEPLAY_OUT_DIR) --frames $(FLICKY_GAMEPLAY_FRAMES) $(if $(FLICKY_GAMEPLAY_MAME_VIDEO),--mame-video "$(FLICKY_GAMEPLAY_MAME_VIDEO)" --mame-frame $(FLICKY_GAMEPLAY_MAME_FRAME),)
+
+
+BTTF3_PAL_ROM ?= roms/Back to the Future Part III (Europe).sms
+BTTF3_PAL_OUT_DIR ?= test-results/bttf3_pal_start
+BTTF3_PAL_FRAMES ?= 3000
+
+test-bttf3-pal-start: $(PRGNAME)
+	python3 source/tests/bttf3_pal_start_regression.py --binary ./$(PRGNAME) --rom "$(BTTF3_PAL_ROM)" --out-dir $(BTTF3_PAL_OUT_DIR) --frames $(BTTF3_PAL_FRAMES)
 
 SONIC_DRIFT2_GG_ROM_DIR ?= roms
 SONIC_DRIFT2_GG_OUT_DIR ?= test-results/sonic_drift2_gg
@@ -244,12 +252,16 @@ test-sms-vdp-latch: $(PRGNAME)
 
 VDPTEST_ROM_DIR ?= roms
 VDPTEST_OUT_DIR ?= test-results/vdptest_sms
+VDPTEST_PAL_OUT_DIR ?= test-results/vdptest_sms_pal
 VDPTEST_INPUT ?=
 VDPTEST_FRAMES ?= 1200
 VDPTEST_CADENCE ?= 10
 
 test-vdptest-sms: $(PRGNAME)
-	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR) --frames $(VDPTEST_FRAMES) --cadence $(VDPTEST_CADENCE) $(if $(VDPTEST_INPUT),--input $(VDPTEST_INPUT),)
+	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR) --region ntsc --frames $(VDPTEST_FRAMES) --cadence $(VDPTEST_CADENCE) $(if $(VDPTEST_INPUT),--input $(VDPTEST_INPUT),)
+
+test-vdptest-sms-pal: $(PRGNAME)
+	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_PAL_OUT_DIR) --region pal --frames $(VDPTEST_FRAMES) --cadence $(VDPTEST_CADENCE) $(if $(VDPTEST_INPUT),--input $(VDPTEST_INPUT),)
 
 COLECO_VM_MULTICOLOR_ROM ?= roms/CV/vm_multicolor.cv
 COLECO_VM_MULTICOLOR_BIOS ?= BIOS.col

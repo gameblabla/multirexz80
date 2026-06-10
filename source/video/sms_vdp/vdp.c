@@ -1119,10 +1119,11 @@ static void systeme_vdp_update_vint_flag_for_now(vdp_t *ctx)
 	int32_t dot = cyc % system_cycles_per_line();
 	int32_t flag_cycle = 25;
 
-	if ((line == ctx->height) && (dot >= flag_cycle))
+	if ((line == ctx->height) && (dot >= flag_cycle) && !ctx->vint_flag_raised)
 	{
 		ctx->status |= 0x80;
 		ctx->vint_pending = 1;
+		ctx->vint_flag_raised = 1;
 		if (ctx->reg[0x01] & 0x20)
 			z80_set_irq_line(vdp.irq, ASSERT_LINE);
 	}
@@ -1279,17 +1280,24 @@ static int vdp_vcounter_line_for_now(void)
     return line;
 }
 
-static void vdp_update_vint_flag_for_now(void)
+static int vdp_vint_flag_event_now(void)
 {
+    int32_t cycles_per_line = system_cycles_per_line();
     int32_t cyc = z80_get_elapsed_cycles();
-    int32_t line = (cyc / system_cycles_per_line()) % vdp.lpf;
-    int32_t dot = cyc % system_cycles_per_line();
+    int32_t line = (cyc / cycles_per_line) % vdp.lpf;
+    int32_t dot = cyc % cycles_per_line;
     int32_t flag_cycle = vdp_gamegear_timing_active() ? 27 : 15;
 
-    if ((line == ((int32_t)vdp.height + 1)) && (dot >= flag_cycle))
+    return (line == ((int32_t)vdp.height + 1)) && (dot >= flag_cycle);
+}
+
+static void vdp_update_vint_flag_for_now(void)
+{
+    if (vdp_vint_flag_event_now() && !vdp.vint_flag_raised)
     {
         vdp.status |= 0x80;
         vdp.vint_pending = 1;
+        vdp.vint_flag_raised = 1;
         if (vdp.reg[0x01] & 0x20)
         {
 #ifdef SORDM5_EMU
@@ -1322,6 +1330,8 @@ uint8_t vdp_read(int32_t offset)
 
 			/* low 5 bits return non-zero data (fixes PGA Tour Golf course map introduction) */
 			temp = vdp.status | 0x1f;
+			if (temp & 0x80)
+				vdp.vint_flag_ack_seen = 1;
 
 			/* Clear visible flags.  The SMS VDP status port is also read by the
 			 * standard IM 1 IRQ vector solely to acknowledge frame/line IRQs.

@@ -76,6 +76,8 @@ typedef struct
     uint8_t irq;
     uint8_t vint_pending;
     uint8_t hint_pending;
+    uint8_t vint_flag_raised;
+    uint8_t vint_flag_ack_seen;
     uint8_t spr_ovr;
     uint8_t bd;
     uint8_t sprite_mode_latch;

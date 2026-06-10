@@ -17,7 +17,7 @@ import sys
 import zlib
 from typing import Optional
 
-DEFAULT_HASHES = {
+NTSC_HASHES = {
     # The VDPTEST input script advances through several short-lived pages.
     # Capture after the transition frames have completed, not on the grey
     # interstitials between tests or after the script has already returned to
@@ -27,6 +27,16 @@ DEFAULT_HASHES = {
     520: "28ceb705bbb3fe4b993c97fd27a1516ae722848ceb6287717f13830d5c17a479",  # SMS VDP sprite test results; frame 500 is still a grey transition
     600: "0aa317e99c49d2725bb600adbd6122291d42e48823471567d4dbcdfa1e30f97c",  # X-scroll latch-time visual check
     700: "74eefaee3199fc2abcf31b77b80d1acdf220ec3c8126866dcd81d6aa156d4572",  # HCounter values; frame 900 has already returned to the menu
+}
+
+PAL_HASHES = {
+    # Same scripted VDPTEST sequence in SMS PAL/50 Hz mode.  The misc page
+    # intentionally says PAL and the HCounter page reports the PAL sequence.
+    300: "23812e71b18ccd16b081f49ae7c00322634086de396a21979120d8254d10ee5f",
+    430: "a1560d443e8d72d45abac26796c28816172f061569905005e0e26af95e335253",
+    520: "28ceb705bbb3fe4b993c97fd27a1516ae722848ceb6287717f13830d5c17a479",
+    600: "0aa317e99c49d2725bb600adbd6122291d42e48823471567d4dbcdfa1e30f97c",
+    700: "9356768acd53695c69b32a410a96966564879a6881e4213825c3f78d5fbd185c",
 }
 
 
@@ -93,6 +103,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--rom-dir", type=Path, default=Path("roms"))
     ap.add_argument("--out-dir", type=Path, default=Path("test-results/vdptest_sms"))
     ap.add_argument("--rom", default="VDPTEST.sms")
+    ap.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="SMS video mode to test")
     ap.add_argument("--input", default=None, help="input script path/name; default is ROM-stem_CRC.input, then ROM-stem.input/script")
     ap.add_argument("--frames", type=int, default=1200)
     ap.add_argument("--cadence", type=int, default=10)
@@ -114,24 +125,26 @@ def main(argv: list[str]) -> int:
         return 2
     assert script is not None
 
-    if args.frames < max(DEFAULT_HASHES):
-        print(f"--frames must be at least {max(DEFAULT_HASHES)} for the configured screenshot baselines", file=sys.stderr)
+    hashes = PAL_HASHES if args.region == "pal" else NTSC_HASHES
+
+    if args.frames < max(hashes):
+        print(f"--frames must be at least {max(hashes)} for the configured screenshot baselines", file=sys.stderr)
         return 2
     if args.cadence <= 0:
         print("--cadence must be positive", file=sys.stderr)
         return 2
 
-    uncovered = [f for f in DEFAULT_HASHES if f % args.cadence != 0]
+    uncovered = [f for f in hashes if f % args.cadence != 0]
     if uncovered:
         print("--cadence does not capture configured baseline frame(s): " + ", ".join(map(str, sorted(uncovered))), file=sys.stderr)
         return 2
 
-    prefix_name = "vdptest_sms"
+    prefix_name = f"vdptest_sms_{args.region}"
     prefix = out_dir / prefix_name
     wav = out_dir / f"{prefix_name}.wav"
     remove_stale_screenshots(out_dir, prefix_name)
     cmd = [
-        str(binary), "--console", "sms", "--frames", str(args.frames),
+        str(binary), "--console", "sms", "--region", args.region, "--frames", str(args.frames),
         "--input-playback", str(script),
         "--screenshot-prefix", str(prefix), "--screenshot-every", str(args.cadence),
         "--audio-wav", str(wav), "--quiet", str(rom),
@@ -139,10 +152,10 @@ def main(argv: list[str]) -> int:
     subprocess.run(cmd, check=True)
 
     failures: list[str] = []
-    print("VDPTEST SMS screenshot regression")
+    print(f"VDPTEST SMS {args.region.upper()} screenshot regression")
     print(f"rom={rom.name} input={script.name}")
     print("%-8s %-8s %s" % ("frame", "status", "sha256"))
-    for frame, expected in sorted(DEFAULT_HASHES.items()):
+    for frame, expected in sorted(hashes.items()):
         shot = out_dir / f"{prefix_name}_{frame:06d}.ppm"
         if not shot.exists():
             failures.append(f"frame {frame}: missing screenshot {shot}")
