@@ -216,7 +216,7 @@ int snk_psychos_alloc(void)
     snk.tx_vram = snk_xcalloc(SNK_TXVRAM_SIZE, 1);
     snk.audio_ram = snk_xcalloc(SNK_AUDIORAM_SIZE, 1);
     snk.palette = (uint32_t *)calloc(0x400, sizeof(uint32_t));
-    snk.framebuf_shadow = (uint32_t *)calloc((size_t)SNK_PSYCHOS_FRAME_WIDTH * SNK_PSYCHOS_FRAME_HEIGHT, sizeof(uint32_t));
+    snk.framebuf_shadow = (uint32_t *)calloc(SNK_PSYCHOS_FRAME_WIDTH, (size_t)SNK_PSYCHOS_FRAME_HEIGHT * sizeof(uint32_t));
     snk.framebuf = snk.framebuf_shadow;
     snk.tx_dec = snk_xcalloc(SNK_TX_DECODED_SIZE, 1);
     snk.bg_dec = snk_xcalloc(SNK_BG_DECODED_SIZE, 1);
