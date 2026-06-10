@@ -228,7 +228,7 @@ void *multirexz80_static_realloc(void *ptr, size_t size)
     if (!new_ptr)
         return NULL;
 
-    copy_size = block->size < size ? block->size : size;
+    copy_size = block->size; /* block->size < size is guaranteed by earlier checks */
     memcpy(new_ptr, ptr, copy_size);
     multirexz80_static_free(ptr);
     return new_ptr;
