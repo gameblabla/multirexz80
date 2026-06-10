@@ -216,6 +216,9 @@ test-sms-vdp-latch: $(PRGNAME)
 
 VDPTEST_ROM_DIR ?= roms
 VDPTEST_OUT_DIR ?= test-results/vdptest_sms
+VDPTEST_INPUT ?=
+VDPTEST_FRAMES ?= 1200
+VDPTEST_CADENCE ?= 10
 
 test-vdptest-sms: $(PRGNAME)
-	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR)
+	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR) --frames $(VDPTEST_FRAMES) --cadence $(VDPTEST_CADENCE) $(if $(VDPTEST_INPUT),--input $(VDPTEST_INPUT),)

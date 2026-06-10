@@ -157,8 +157,10 @@ static rominfo_t game_list[] =
 	/* Games that require PAL timings (from MEKA.nam by Omar Cornut) */
 	{0x72420F38, 0, DEVICE_PAD2B, MAPPER_SEGA, DISPLAY_PAL, TERRITORY_EXPORT, CONSOLE_SMS2, FM_COMPATIBLE,
 	"Addams Familly"},
+	/* Back to the Future Part III (Europe) is timing-sensitive/problematic on
+	 * NTSC or SMS1 defaults; force 50 Hz PAL SMS2. */
 	{0x2D48C1D3, 0, DEVICE_PAD2B, MAPPER_SEGA, DISPLAY_PAL, TERRITORY_EXPORT, CONSOLE_SMS2, FM_COMPATIBLE,
-	"Back to the Future Part III"},
+	"Back to the Future Part III (Europe) [50 Hz PAL SMS2]"},
 	{0x1CBB7BF1, 0, DEVICE_PAD2B, MAPPER_SEGA, DISPLAY_PAL, TERRITORY_EXPORT, CONSOLE_SMS2, FM_COMPATIBLE,
 	"Battlemaniacs (BR)"}, 
 	{0x1B10A951, 0, DEVICE_PAD2B, MAPPER_SEGA, DISPLAY_PAL, TERRITORY_EXPORT, CONSOLE_SMS2, FM_COMPATIBLE,
