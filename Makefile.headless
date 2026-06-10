@@ -222,3 +222,19 @@ VDPTEST_CADENCE ?= 10
 
 test-vdptest-sms: $(PRGNAME)
 	python3 source/tests/vdptest_regression.py --binary ./$(PRGNAME) --rom-dir $(VDPTEST_ROM_DIR) --out-dir $(VDPTEST_OUT_DIR) --frames $(VDPTEST_FRAMES) --cadence $(VDPTEST_CADENCE) $(if $(VDPTEST_INPUT),--input $(VDPTEST_INPUT),)
+
+COLECO_VM_MULTICOLOR_ROM ?= roms/CV/vm_multicolor.cv
+COLECO_VM_MULTICOLOR_BIOS ?= BIOS.col
+COLECO_VM_MULTICOLOR_OUT_DIR ?= test-results/coleco_vm_multicolor
+COLECO_VM_MULTICOLOR_FRAMES ?= 80
+
+test-coleco-vm-multicolor: $(PRGNAME)
+	python3 source/tests/coleco_vm_multicolor_regression.py --binary ./$(PRGNAME) --rom "$(COLECO_VM_MULTICOLOR_ROM)" --bios "$(COLECO_VM_MULTICOLOR_BIOS)" --out-dir $(COLECO_VM_MULTICOLOR_OUT_DIR) --frames $(COLECO_VM_MULTICOLOR_FRAMES)
+
+COLECO_MULTI_SPRITES_ROM ?= roms/CV/multi_sprites.cv
+COLECO_MULTI_SPRITES_BIOS ?= BIOS.col
+COLECO_MULTI_SPRITES_OUT_DIR ?= test-results/coleco_multi_sprites
+COLECO_MULTI_SPRITES_FRAMES ?= 120
+
+test-coleco-multi-sprites: $(PRGNAME)
+	python3 source/tests/coleco_multi_sprites_regression.py --binary ./$(PRGNAME) --rom "$(COLECO_MULTI_SPRITES_ROM)" --bios "$(COLECO_MULTI_SPRITES_BIOS)" --out-dir $(COLECO_MULTI_SPRITES_OUT_DIR) --frames $(COLECO_MULTI_SPRITES_FRAMES)

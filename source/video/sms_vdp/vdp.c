@@ -203,7 +203,10 @@ static void vdp_invalidate_sprite_status_pipeline(uint16_t index)
 
 int vdp_gamegear_timing_active(void)
 {
-	return (sms.console == CONSOLE_GG) || (sms.console == CONSOLE_GGMS);
+	/* CONSOLE_GGMS is SMS compatibility mode reached through the Game Gear
+	 * frontend. It still uses the SMS 256-pixel timing model here; only native
+	 * Game Gear mode gets the GG-specific VDP event phase. */
+	return sms.console == CONSOLE_GG;
 }
 
 int vdp_render_event_cycle(void)
@@ -309,23 +312,19 @@ void vdp_frame_scroll_latch_start(void)
 }
 
 
-static int vdp_smsgg_console(void)
+static int vdp_sms_or_native_gg_console(void)
 {
-	/* Use the cycle-accurate SMS/GG timing path for every SMS-family VDP
-	 * frontend mode.  The SDL3 frontend auto-detects ordinary .sms images as
-	 * CONSOLE_SMS2 unless --console sms is supplied; leaving SMS2 on the legacy
-	 * line-end path makes VDPTEST's IRQ/HCounter/VINT edge tests fail in SDL3
-	 * even though the headless regression, which forces --console sms, passes.
-	 */
+	/* Use the cycle-aware Mode 4 path for SMS/SMS2 and native Game Gear.
+	 * CONSOLE_GGMS is an SMS compatibility frontend mode, so it should not
+	 * opt into GG-specific timing or add another VDP-special case. */
 	return (sms.console == CONSOLE_SMS) ||
 	       (sms.console == CONSOLE_SMS2) ||
-	       (sms.console == CONSOLE_GG) ||
-	       (sms.console == CONSOLE_GGMS);
+	       (sms.console == CONSOLE_GG);
 }
 
 int vdp_timed_render_active(void)
 {
-	return vdp_smsgg_console();
+	return vdp_sms_or_native_gg_console();
 }
 
 static void vdp_maybe_update_hscroll_on_reg8_write(uint8_t data)
@@ -866,7 +865,7 @@ static void vdp_reg_w(uint8_t r, uint8_t d)
 		}
 		vdp_maybe_update_hscroll_on_reg8_write(d);
 	}
-	if ((r == 0 || r == 1) && vdp_smsgg_console() && (vdp.reg[1] & 0x40) && (vdp.line < vdp.height))
+	if ((r == 0 || r == 1) && vdp_sms_or_native_gg_console() && (vdp.reg[1] & 0x40) && (vdp.line < vdp.height))
 	{
 		uint8_t new_sprite_mode = vdp_sprite_mode_from_regs(&vdp);
 		uint8_t changed_sprite_mode = (uint8_t)((old_sprite_mode ^ new_sprite_mode) & 0x0B);
@@ -1254,19 +1253,6 @@ void vdp_write(int32_t offset, uint8_t data)
   }
 }
 
-static int vdp_uses_gg_vcounter_phase(void)
-{
-    /*
-     * Gearsystem models the GG V counter as the scanline latched at the
-     * VCOUNT timing point: reads before the VCOUNT event still observe the
-     * previous line, reads after it observe the current line.  Do this only
-     * for true Game Gear mode selected by the frontend.  System E reuses an
-     * SMS/GG-derived VDP but is driven through CONSOLE_SYSTEME; keeping the
-     * legacy phase there preserves existing System E timing/regression output.
-     */
-    return (sms.console == CONSOLE_GG) && (option.console == 3);
-}
-
 static int vdp_vcounter_line_for_now(void)
 {
     int32_t cycles_per_line = system_cycles_per_line();
@@ -1290,7 +1276,6 @@ static int vdp_vcounter_line_for_now(void)
     if (dot < vcount_cycle)
         line = (line + vdp.lpf - 1) % vdp.lpf;
 
-    (void)vdp_uses_gg_vcounter_phase;
     return line;
 }
 
