@@ -16,6 +16,53 @@
 #include "shared.h"
 #include "unzip.h"
 
+static const char *zip_path_ext(const char *path)
+{
+    const char *dot = path ? strrchr(path, '.') : NULL;
+    return dot ? dot : "";
+}
+
+static int zip_ext_equal(const char *ext, const char *wanted)
+{
+    if (!ext || !wanted) return 0;
+    while (*ext && *wanted)
+    {
+        int a = *ext++;
+        int b = *wanted++;
+        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        if (a != b) return 0;
+    }
+    return *ext == '\0' && *wanted == '\0';
+}
+
+static int zip_member_supported_rom_ext(const char *name)
+{
+    const char *ext = zip_path_ext(name);
+    return zip_ext_equal(ext, ".sms") || zip_ext_equal(ext, ".gg") ||
+           zip_ext_equal(ext, ".sg")  || zip_ext_equal(ext, ".sc") ||
+           zip_ext_equal(ext, ".sf")  || zip_ext_equal(ext, ".col") ||
+           zip_ext_equal(ext, ".cv")  || zip_ext_equal(ext, ".m5") ||
+           zip_ext_equal(ext, ".rom") || zip_ext_equal(ext, ".bin");
+}
+
+static void zip_apply_member_console_hint(const char *name)
+{
+    const char *ext = zip_path_ext(name);
+
+    if (option.console != 0)
+        return;
+
+    if (zip_ext_equal(ext, ".col") || zip_ext_equal(ext, ".cv"))
+        option.console = 6;
+    else if (zip_ext_equal(ext, ".gg"))
+        option.console = 3;
+    else if (zip_ext_equal(ext, ".sg"))
+        option.console = 5;
+    else if (zip_ext_equal(ext, ".m5"))
+        option.console = 7;
+}
+
 uint8_t *loadFromZipByName(char *archive, char *filename, uint32_t *filesize)
 {
     char name[PATH_MAX];
@@ -24,26 +71,36 @@ uint8_t *loadFromZipByName(char *archive, char *filename, uint32_t *filesize)
     int32_t zerror = UNZ_OK;
     unzFile zhandle;
     unz_file_info zinfo;
+    int found_supported_rom = 0;
     
     zinfo.uncompressed_size = 0;
 
     zhandle = unzOpen(archive);
     if(!zhandle) return (NULL);
 
-    /* Seek to first file in archive */
+    /* Prefer the first supported ROM member instead of blindly loading the
+     * first archive entry.  This makes plain .zip cartridge loading usable
+     * when the archive starts with a README, directory entry, or artwork. */
     zerror = unzGoToFirstFile(zhandle);
-    if(zerror != UNZ_OK)
+    while(zerror == UNZ_OK)
+    {
+        memset(name, 0, sizeof(name));
+        unzGetCurrentFileInfo(zhandle, &zinfo, &name[0], sizeof(name) - 1, NULL, 0, NULL, 0);
+        if (zinfo.uncompressed_size != 0 && zip_member_supported_rom_ext(name))
+        {
+            found_supported_rom = 1;
+            break;
+        }
+        zerror = unzGoToNextFile(zhandle);
+    }
+
+    if (!found_supported_rom)
     {
         unzClose(zhandle);
         return (NULL);
     }
 
-    /* Get information about the file */
-    unzGetCurrentFileInfo(zhandle, &zinfo, &name[0], 0xff, NULL, 0, NULL, 0);
-    
-    /* Force console if file extension is detected */
-    if (strcmp(strrchr(&name[0], '.'), ".col") == 0) option.console = 6;
-    else if (strcmp(strrchr(&name[0], '.'), ".gg") == 0) option.console = 3;
+    zip_apply_member_console_hint(name);
     
     *filesize = zinfo.uncompressed_size;
 
@@ -64,7 +121,12 @@ uint8_t *loadFromZipByName(char *archive, char *filename, uint32_t *filesize)
 
     /* Allocate buffer and read in file */
     buffer = malloc(*filesize);
-    if(!buffer) return (NULL);
+    if(!buffer)
+    {
+        unzCloseCurrentFile(zhandle);
+        unzClose(zhandle);
+        return (NULL);
+    }
     zerror = unzReadCurrentFile(zhandle, buffer, *filesize);
 
     /* Internal error: free buffer and close file */
@@ -81,7 +143,7 @@ uint8_t *loadFromZipByName(char *archive, char *filename, uint32_t *filesize)
     unzCloseCurrentFile(zhandle);
     unzClose(zhandle);
 
-	memcpy(filename, name, PATH_MAX);
+    memcpy(filename, name, PATH_MAX);
     return (buffer);
 }
 

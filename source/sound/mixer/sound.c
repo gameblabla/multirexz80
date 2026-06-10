@@ -57,6 +57,9 @@ static uint8_t arcade_dual_psg = 0;
 static int16_t *systeme_psg2_stream[2] = { NULL, NULL };
 static sn76489_t systeme_psg2;
 
+extern int32_t system_cycles_per_line(void);
+extern int32_t z80_get_elapsed_cycles(void);
+
 typedef struct
 {
 	int32_t dc_x1;
@@ -203,6 +206,72 @@ static void systeme_mix_second_psg(int16_t **dst, int32_t start, int32_t length)
 		dst[0][i] = mix_saturate_i16((int32_t)dst[0][i] + (int32_t)psg2[0][i]);
 		dst[1][i] = mix_saturate_i16((int32_t)dst[1][i] + (int32_t)psg2[1][i]);
 	}
+}
+
+static void sound_generate_range(int32_t start, int32_t length)
+{
+	int16_t *fm[2], *psg[2];
+
+	if (length <= 0 || !snd.enabled || !psg_buffer || !fm_buffer)
+		return;
+
+	if (start < 0) start = 0;
+	if (start + length > snd.sample_count)
+		length = snd.sample_count - start;
+	if (length <= 0)
+		return;
+
+	psg[0] = psg_buffer[0] + start;
+	psg[1] = psg_buffer[1] + start;
+	fm[0]  = fm_buffer[0] + start;
+	fm[1]  = fm_buffer[1] + start;
+
+	if (sms.console != CONSOLE_SNKPSYCHOS)
+	{
+		psg_update_backend(0, psg, length);
+		if (systeme_dual_psg)
+			systeme_mix_second_psg(psg, start, length);
+	}
+
+	if (sms.console == CONSOLE_SNKPSYCHOS)
+		snk_psychos_sound_update(fm, length);
+	else if (sms.use_fm)
+		FM_Update(fm, length);
+}
+
+static void sound_update_to_sample(int32_t target_sample)
+{
+	if (!snd.enabled)
+		return;
+
+	if (target_sample < 0) target_sample = 0;
+	if (target_sample > snd.sample_count) target_sample = snd.sample_count;
+	if (target_sample <= snd.done_so_far)
+		return;
+
+	sound_generate_range(snd.done_so_far, target_sample - snd.done_so_far);
+	snd.done_so_far = target_sample;
+}
+
+void MULTIREXZ80_sound_sync_to_cpu(void)
+{
+	int32_t cycles_per_line, total_cycles, elapsed;
+	int64_t sample;
+
+	if (!snd.enabled || snd.sample_count <= 0)
+		return;
+
+	cycles_per_line = system_cycles_per_line();
+	total_cycles = cycles_per_line * smptab_len;
+	if (total_cycles <= 0)
+		return;
+
+	elapsed = z80_get_elapsed_cycles();
+	if (elapsed < 0) elapsed = 0;
+	if (elapsed > total_cycles) elapsed = total_cycles;
+
+	sample = ((int64_t)elapsed * (int64_t)snd.sample_count) / (int64_t)total_cycles;
+	sound_update_to_sample((int32_t)sample);
 }
 
 uint32_t MULTIREXZ80_sound_init(void)
@@ -413,67 +482,28 @@ void MULTIREXZ80_sound_reset(void)
 
 void MULTIREXZ80_sound_update(int32_t line)
 {
-	int16_t *fm[2], *psg[2];
+	int32_t target;
 
-	/*if(!snd.enabled)
-		return;*/
+	if (!snd.enabled)
+		return;
 
-	/* Finish buffers at end of frame */
-	if(line == smptab_len - 1)
+	if (line == smptab_len - 1)
 	{
-		psg[0] = psg_buffer[0] + snd.done_so_far;
-		psg[1] = psg_buffer[1] + snd.done_so_far;
-		fm[0]  = fm_buffer[0] + snd.done_so_far;
-		fm[1]  = fm_buffer[1] + snd.done_so_far;
-
-		/* Generate SN76489 sample data.  Psycho Soldier hardware has no SN76489;
-		 * leaving the already-zero PSG buffers untouched avoids thousands of
-		 * no-op PSG update calls per second. */
-		if (sms.console != CONSOLE_SNKPSYCHOS)
-		{
-			psg_update_backend(0, psg, snd.sample_count - snd.done_so_far);
-			if (systeme_dual_psg)
-				systeme_mix_second_psg(psg, snd.done_so_far, snd.sample_count - snd.done_so_far);
-		}
-
-		/* Generate FM sample data */
-		if (sms.console == CONSOLE_SNKPSYCHOS)
-			snk_psychos_sound_update(fm, snd.sample_count - snd.done_so_far);
-		else if (sms.use_fm)
-			FM_Update(fm, snd.sample_count - snd.done_so_far);
+		target = snd.sample_count;
+		sound_update_to_sample(target);
 
 		/* Mix streams into output buffer */
 		snd.mixer_callback(snd.output, snd.sample_count);
-		/* Reset */
+
+		/* Reset for next frame */
 		snd.done_so_far = 0;
 	}
 	else
 	{
-		int32_t tinybit;
-		tinybit = smptab[line] - snd.done_so_far;
-
-		/* Do a tiny bit */
-		psg[0] = psg_buffer[0] + snd.done_so_far;
-		psg[1] = psg_buffer[1] + snd.done_so_far;
-		fm[0]  = fm_buffer[0] + snd.done_so_far;
-		fm[1]  = fm_buffer[1] + snd.done_so_far;
-
-		/* Generate SN76489 sample data */
-		if (sms.console != CONSOLE_SNKPSYCHOS)
-		{
-			psg_update_backend(0, psg, tinybit);
-			if (systeme_dual_psg)
-				systeme_mix_second_psg(psg, snd.done_so_far, tinybit);
-		}
-
-		/* Generate FM sample data */
-		if (sms.console == CONSOLE_SNKPSYCHOS)
-			snk_psychos_sound_update(fm, tinybit);
-		else if (sms.use_fm)
-			FM_Update(fm, tinybit);
-
-		/* Sum total */
-		snd.done_so_far += tinybit;
+		if (!smptab)
+			return;
+		target = smptab[line];
+		sound_update_to_sample(target);
 	}
 }
 
@@ -549,6 +579,7 @@ void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length)
 
 void psg_stereo_w(int32_t data)
 {
+	MULTIREXZ80_sound_sync_to_cpu();
 	MULTIREXZ80_TRACE_PSG_WRITE(0x0001, (uint8_t)data);
 	/*if(!snd.enabled) return;*/
 	SN76489_GGStereoWrite(data);
@@ -558,6 +589,7 @@ void psg_stereo_w(int32_t data)
 void psg_write_chip(int32_t chip, int32_t data)
 {
 	uint8_t target = (systeme_dual_psg && chip) ? 1 : 0;
+	MULTIREXZ80_sound_sync_to_cpu();
 	MULTIREXZ80_TRACE_PSG_WRITE(target ? 0x0002 : 0x0000, (uint8_t)data);
 	/*if(!snd.enabled) return;*/
 	psg_write_backend(target, (uint8_t)data);
@@ -586,6 +618,7 @@ void fmunit_detect_w(uint32_t data)
 
 void fmunit_write(uint32_t offset, uint8_t data)
 {
+	MULTIREXZ80_sound_sync_to_cpu();
 	MULTIREXZ80_TRACE_YM_WRITE((uint16_t)(0x00f0 | (offset & 1)), data);
 	if(/* !snd.enabled || */ !sms.use_fm) return;
 	FM_Write(offset, data);

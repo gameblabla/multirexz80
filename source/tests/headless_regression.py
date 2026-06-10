@@ -27,27 +27,27 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "system1",
         "frames": 3600,
         "screenshot_sha256": "723dc2ecc2f687188acd7771fa15c43daa9612b65bc2078ae2a2a6c501fafcf1",
-        "pcm_sha256": "91072cf751b4a71bcb9e3ee7b7de2c36c707a3752d69312b3b5fc72cd3b470a2",
+        "pcm_sha256": "8f48c9b990c2b9795121beb0b3f6c2db2ffd1ff4561d8384b83a7450e5efe117",
     },
     "blockgalb": {
         "roms": ["blockgalb.zip"],
         "console": "system1",
         "frames": 3600,
         "screenshot_sha256": "f268e9645b50088746cf8a3406394c151d5b51092daf5a5c89d385feba2da675",
-        "pcm_sha256": "5620aef16277f41a8ba1e5f6f8804eb7ed30033a575fdbf3a885447e85ee8c8a",
+        "pcm_sha256": "fd907f65c2903627e9ca4bc81e449b307d9e61334a4a2fdcfd24cd5cb6dee5fc",
     },
     "choplift": {
         "roms": ["choplift.zip"],
         "console": "system1",
         "frames": 3600,
-        "screenshot_sha256": "5c58d4bb482315b7a4aa4e6abf7865c8facd862259885c6d54926e6d4bcd7601",
-        "pcm_sha256": "5b32b840a68666cad8ee454c56e180beb38986524d7f407c17f1645a0d791cc2",
+        "screenshot_sha256": "435a6718cd5ff6280f508fa692e784967418ff2d69c8b552733d8208eec2cdde",
+        "pcm_sha256": "f95cb4c22ce6764c8870bfddf49fddfd63d34174ac4ae870137ddb0632ca15b3",
     },
     "flicky": {
         "roms": ["flicky.zip"],
         "console": "system1",
         "frames": 3600,
-        "screenshot_sha256": "af2c76cd3bf642d7f141023df9187f810e153f6b5f7f50a6fe6f985921349daa",
+        "screenshot_sha256": "1d079273592a9365c4f096cc201b6ff749fb7d0cf466f401b7cf0bc6acb39b94",
         "pcm_sha256": "04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669",
     },
     "gardia": {
@@ -55,14 +55,14 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "system1",
         "frames": 3600,
         "screenshot_sha256": "5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa",
-        "pcm_sha256": "460723343cd5be08ca004c6fae269ba6038cd7225e1f5427665dbe080db69f36",
+        "pcm_sha256": "b92a66a8855e0ddc5742280d565fb7db891e8114f43526952e53958798fb2ee9",
     },
     "teddybb": {
         "roms": ["teddybb.zip"],
         "console": "system1",
         "frames": 3600,
         "screenshot_sha256": "c65e2a00e1ce211724b6f9bbc2412f5ef7b51b6deaff8ed6bde19a9bb1108448",
-        "pcm_sha256": "6c466ee5b2f9ddaaa225bfede26e2fa041e2ed952b0de0f2db97216798931242",
+        "pcm_sha256": "90be5f138064d59415d916d6c461d0d00c6ed465cfa5e6108249e3983418c158",
     },
     "psychos": {
         "roms": ["psychos.zip"],
@@ -75,14 +75,14 @@ GAMES: dict[str, dict[str, object]] = {
         "roms": ["ikari.zip"],
         "console": "psychos",
         "frames": 3600,
-        "screenshot_sha256": "cf4fb79f9fd8d5035a1b3d541197b17ab9e18ab64510c509e35d1873bbbfc8f5",
+        "screenshot_sha256": "3b1c1ded9d06c75570bbe4f20a2045e64f33a2c0e831152167f386cdde1e767f",
         "pcm_sha256": "99bdaa4bc3da37a01f2c83e08bf7f65bc9a0d9bb72ff8d5075df3c9b0febfdef",
     },
     "athena": {
         "roms": ["athena.zip"],
         "console": "psychos",
         "frames": 3600,
-        "screenshot_sha256": "d171dade1dd143927936b2eeac2c0d4ed80d9acfabe15741ea910c3742e2bcd0",
+        "screenshot_sha256": "138f01e21352858617609bdfce04520b3afe5e117c3ba3ba49bd2a3d1f09ebe7",
         "pcm_sha256": "9481a3f27fa7c98970dae92a7c92dddf8d2ae1d724461a459c5e1eb34851b96b",
     },
     "sonic1_sms": {
@@ -90,7 +90,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "sms",
         "frames": 3600,
         "screenshot_sha256": "eb3c62b5e276f4876d6cb05323e34b3816c06f785bda22959300c6d4e7a1c431",
-        "pcm_sha256": "caf41b933c2e00e7e43e8dba722cfaf046246f7e200801ed95f5862c4005a292",
+        "pcm_sha256": "4134d175dec6721e808d390291f30b3c5d67265ea276af3cb6dd3e63d1829faf",
     },
 
     "sonic_drift2_gg": {
@@ -98,7 +98,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "gg",
         "frames": 3600,
         "screenshot_sha256": "d2f031809d7cd79621fb57afe5cd1d493a9f8a264b3c03831db88c152517a23e",
-        "pcm_sha256": "7a0da666b84359eca6ba6a4d650847af88fd6447cef0222fa0234d8c8b270474",
+        "pcm_sha256": "c7ef6074442c8f70b02ff28df1b874d47df21f8b46ddc9ed60077f70ea483750",
     },
 
     "tetrisse": {
@@ -106,21 +106,21 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "systeme",
         "frames": 3600,
         "screenshot_sha256": "802306d10d1479e5634ff9d1a599983b74817de6a50eaadf91c77e5ea5b60e15",
-        "pcm_sha256": "a962142b9e83da92718f1fc33d631115eadd8ff74e80e84cd41530dbf91c52fd",
+        "pcm_sha256": "ea5a46641af14e84d84a0fe19a5236a098ea8f9354a00a88a310dda9b613ff94",
     },
     "transfrm": {
         "roms": ["transfrm.zip"],
         "console": "systeme",
         "frames": 3600,
         "screenshot_sha256": "68c7852c22590c31b4f26db6344b429f3f3ee0a975296ffb0e1979ae59afcff5",
-        "pcm_sha256": "a4da02be3d27da98d6aa554a9841c706dd9001c981d84515593b2b31056d7843",
+        "pcm_sha256": "49722a787982c00a7a639fc1e9b4f87707bbdc6c83cb60c8b3d93001b6283035",
     },
     "drift2": {
         "roms": ["drift2.zip"],
         "console": "systeme",
         "frames": 3600,
-        "screenshot_sha256": "d2f031809d7cd79621fb57afe5cd1d493a9f8a264b3c03831db88c152517a23e",
-        "pcm_sha256": "7a0da666b84359eca6ba6a4d650847af88fd6447cef0222fa0234d8c8b270474",
+        "screenshot_sha256": "1fd9d9655964fcd78aad61404b948ac0efed627174e950dfb385989ce6f07560",
+        "pcm_sha256": "04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669",
     },
 
     "fantastic_dizzy_sms_logo_wave_250": {
@@ -129,7 +129,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 250,
         "screenshot_sha256": "e75b62370f6c43318588510b57174edff822f526a27fec24df5ce863f29ffc89",
-        "pcm_sha256": "e279e45c70476c0c1e805f4f768a2a713d003cdc941d66522e7f44731e184fb9",
+        "pcm_sha256": "78ec032ad11e651d2bbea8a06495ff91101477d094c4a4fa41856f7bf73b5811",
     },
 
     "fantastic_dizzy_sms_logo_wave_300": {
@@ -138,7 +138,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 300,
         "screenshot_sha256": "80dd0c4f8ba8fb84043fdb1c4f8fd32d8333413e90f123f664097ecdc9863245",
-        "pcm_sha256": "db205d66b51399374ebcff752ae489c338747a86e8aca1e607b153819c1baaa8",
+        "pcm_sha256": "8f6e2a410d794ec6c698e8fdf0b2644f0c28f0ed460f70d5cf12fbf12d800411",
     },
 
     "fantastic_dizzy_sms_logo_wave_350": {
@@ -147,7 +147,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 350,
         "screenshot_sha256": "7e8b23c945d7e7bb9ae63ad315035d190445d245e44d2eee4b670e1b6381c952",
-        "pcm_sha256": "d299675aba38a1ff18e827918f196493f3a82e1b1e69e583682a249464516822",
+        "pcm_sha256": "d07adc053c03d4e9e42acb8f4fe0dedea30c2dd304ec2901d2b7872c832d230b",
     },
 
     "fantastic_dizzy_sms_hud": {
@@ -156,7 +156,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 995,
         "screenshot_sha256": "47bd5cf8ef8e7b1d74ba150e60fc18a4055b05ade623750ce31ea6b25846f9f0",
-        "pcm_sha256": "d04a6569fbb4ce447b96899d2c6c37ea428683ed65fa796c0822a90b11a8003f",
+        "pcm_sha256": "7423d7730d1a8ef7e54c1a01b25ca9089a36703e907d57e419f27e0aa5d107a4",
     },
 
     "fantastic_dizzy_sms_language_logo": {
@@ -165,7 +165,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 600,
         "screenshot_sha256": "09949dad817b002f1eb7cab620ca8d11cbe2812d5efcfef889e24c7de7a32727",
-        "pcm_sha256": "73a2adecf7c789736b0d7e268708f0164b6e17bfc46abeb17405bd8da975a1e6",
+        "pcm_sha256": "e305f5c7d768ddd60a86ed19ffe2de80934537bbb96f4cc1cec31d9b5a6eab81",
     },
 
     "fantastic_dizzy_sms_paper_scroll": {
@@ -174,7 +174,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "auto",
         "frames": 700,
         "screenshot_sha256": "81f8fbdcd01016b3a195d1445cdb01d28418a5b956e7ee26f90b0e021e0a0a6e",
-        "pcm_sha256": "cfc68a32be3695d9dde00b81bb0fd23e3919bba8fff9436c060f829a31692de2",
+        "pcm_sha256": "f8244db3c7691c70c4c7d8ceca4a6d0472f96924743e326622bf928e2f0e6a05",
     },
 
 
@@ -184,7 +184,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "gg",
         "frames": 3800,
         "screenshot_sha256": "190943688e882f8326730c0ba587cd3a8791f3c7ba531393f0e482d34ef68a72",
-        "pcm_sha256": "b9004b31fd71e70e9ac0d2586eae2c744da66914064fe1301f8e4407f5211829",
+        "pcm_sha256": "e363cdba2b02c88222dac7c7961c108e97ef5e5821e741f7ea21c7a39cb3167a",
     },
 
     "tarzan_gg": {
@@ -193,7 +193,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "gg",
         "frames": 4000,
         "screenshot_sha256": "35764a277d819839d68caa7520a36e61a2b93dfa82f5b963a69e8b1bbaba2ef5",
-        "pcm_sha256": "cfc983a68da563a7d149106dd93bc62c91d4a04b1a56c7d6a8fa4c3eff107731",
+        "pcm_sha256": "35f591b41f3b8164d41e405533234af1033430134ad4d358c0af9bae0f53ab74",
     },
 
     "tarzan_gg_hud": {
@@ -202,7 +202,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "gg",
         "frames": 900,
         "screenshot_sha256": "f4e1e32e32add3c040e1f8762ab03758b8c98b05df3ce5f293b05cc6eb5075cc",
-        "pcm_sha256": "102f23e78cca1c140471ba70dc795b9b3fb6af09acdf9e220162bd1e0b67932a",
+        "pcm_sha256": "d92837c19b6a69f39fb3ecc868651bf815ff58ef0c61b31dd8b8b523e9bf753e",
     },
 }
 

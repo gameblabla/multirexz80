@@ -116,6 +116,10 @@ typedef struct
     uint32_t *palette;
     uint32_t *framebuf;
     uint32_t *framebuf_shadow;
+    /* RGB output is not enough for SNK sprite shadows: MAME's 3bpp
+     * shadow pen maps the destination palette index to index | 0x200. */
+    uint16_t *frameidx;
+    uint16_t *frameidx_shadow;
     uint8_t *tx_dec;
     uint8_t *bg_dec;
     uint8_t *sp16_dec;
@@ -217,7 +221,9 @@ int snk_psychos_alloc(void)
     snk.audio_ram = snk_xcalloc(SNK_AUDIORAM_SIZE, 1);
     snk.palette = (uint32_t *)calloc(0x400, sizeof(uint32_t));
     snk.framebuf_shadow = (uint32_t *)calloc((size_t)SNK_PSYCHOS_FRAME_WIDTH * SNK_PSYCHOS_FRAME_HEIGHT, sizeof(uint32_t));
+    snk.frameidx_shadow = (uint16_t *)calloc((size_t)SNK_PSYCHOS_FRAME_WIDTH * SNK_PSYCHOS_FRAME_HEIGHT, sizeof(uint16_t));
     snk.framebuf = snk.framebuf_shadow;
+    snk.frameidx = snk.frameidx_shadow;
     snk.tx_dec = snk_xcalloc(SNK_TX_DECODED_SIZE, 1);
     snk.bg_dec = snk_xcalloc(SNK_BG_DECODED_SIZE, 1);
     snk.sp16_dec = snk_xcalloc(SNK_SP16_DECODED_SIZE, 1);
@@ -227,7 +233,7 @@ int snk_psychos_alloc(void)
         !snk.tx_rom || !snk.bg_rom || !snk.sp16_rom || !snk.sp32_rom ||
         !snk.ym2_rom || !snk.sharedram || !snk.bg_vram || !snk.spriteram ||
         !snk.tx_vram || !snk.audio_ram || !snk.palette || !snk.framebuf_shadow ||
-        !snk.tx_dec || !snk.bg_dec || !snk.sp16_dec || !snk.sp32_dec)
+        !snk.frameidx_shadow || !snk.tx_dec || !snk.bg_dec || !snk.sp16_dec || !snk.sp32_dec)
     {
         snk_psychos_free();
         return 0;
@@ -246,8 +252,11 @@ void snk_psychos_free(void)
     free(snk.sharedram); free(snk.bg_vram); free(snk.spriteram); free(snk.tx_vram); free(snk.audio_ram);
     free(snk.palette);
     free(snk.framebuf_shadow);
+    free(snk.frameidx_shadow);
     snk.framebuf = NULL;
     snk.framebuf_shadow = NULL;
+    snk.frameidx = NULL;
+    snk.frameidx_shadow = NULL;
     free(snk.tx_dec);
     free(snk.bg_dec);
     free(snk.sp16_dec);
@@ -1874,6 +1883,7 @@ static void snk_draw_tnk3_bg(void)
         int bx = ((int)snk.bg_scrollx - snk.bg_scrolldx) & 0x1ff;
         int remaining = (int)snk.screen_w;
         uint32_t *dst = snk.framebuf + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
+        uint16_t *idxdst = snk.frameidx + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
 
         while (remaining > 0)
         {
@@ -1892,9 +1902,21 @@ static void snk_draw_tnk3_bg(void)
             {
                 const uint8_t *src = bg + ((size_t)code << 6) + (size_t)py * 8u + (size_t)px;
                 for (i = 0; i < run; i++)
-                    dst[i] = pal[(penbase + src[i]) & 0x3ff];
+                {
+                    int screen_x = (int)(dst - (snk.framebuf + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH)) + i;
+                    if (snk.game_type == SNK_GAME_ATHENA && (screen_x < 16 || screen_x >= 272))
+                    {
+                        dst[i] = 0;
+                        idxdst[i] = 0;
+                        continue;
+                    }
+                    uint16_t pen = (uint16_t)((penbase + src[i]) & 0x3ff);
+                    dst[i] = pal[pen];
+                    idxdst[i] = pen;
+                }
             }
             dst += run;
+            idxdst += run;
             bx = (bx + run) & 0x1ff;
             remaining -= run;
         }
@@ -1922,9 +1944,15 @@ static void snk_draw_bg(void)
         int bx = ((int)snk.bg_scrollx - snk.bg_scrolldx) & 0x1ff;
         int remaining = (int)snk.screen_w;
         uint32_t *dst = snk.framebuf + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
+        uint16_t *idxdst = snk.frameidx + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
 
         while (remaining > 0)
         {
+            /* MAME draws Ikari/Victory Road through a 36x28 visible area with
+             * the 16x16 background tilemap scrolled/clipped by set_scrolldx().
+             * The side columns remain the cleared black bitmap; after ROT270
+             * those source-side columns become the top/bottom black bands. */
+            int screen_x = (int)(dst - (snk.framebuf + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH));
             int px = bx & 15;
             int run = 16 - px;
             int tx = (bx >> 4) & 31;
@@ -1951,23 +1979,35 @@ static void snk_draw_bg(void)
                 const uint8_t *src = bg + ((size_t)code << 8) + (size_t)py * 16u + (size_t)px;
                 for (i = 0; i < run; i++)
                 {
-                    uint8_t pix = src[i];
-                    /* Ikari's title screen leaves the background map on pen 0x0f;
-                     * render it as the black video backdrop so the title matches
-                     * the arcade/MAME capture instead of showing PROM grey. */
-                    if (snk.game_type == SNK_GAME_IKARI && pix == 0x0f)
+                    if (snk_is_ikari_video_hw() && (screen_x + i < 16 || screen_x + i >= 272))
+                    {
                         dst[i] = 0;
-                    else
-                        dst[i] = pal[(penbase + pix) & 0x3ff];
+                        idxdst[i] = 0;
+                        continue;
+                    }
+                    uint8_t pix = src[i];
+                    uint16_t pen = (uint16_t)((penbase + pix) & 0x3ff);
+                    dst[i] = pal[pen];
+                    idxdst[i] = pen;
                 }
             }
             else
             {
                 uint32_t fill = pal[(penbase + 0x0f) & 0x3ff];
                 for (i = 0; i < run; i++)
+                {
+                    if (snk_is_ikari_video_hw() && (screen_x + i < 16 || screen_x + i >= 272))
+                    {
+                        dst[i] = 0;
+                        idxdst[i] = 0;
+                        continue;
+                    }
                     dst[i] = fill;
+                    idxdst[i] = (uint16_t)((penbase + 0x0f) & 0x3ff);
+                }
             }
             dst += run;
+            idxdst += run;
             bx = (bx + run) & 0x1ff;
             remaining -= run;
         }
@@ -1991,12 +2031,17 @@ static void snk_draw_tx(void)
 
     for (sy = 0; sy < (int)snk.screen_h; sy++)
     {
-        int ty = ((sy + snk.tx_scroll_y) >> 3) % snk.tx_rows;
-        int py = (sy + snk.tx_scroll_y) & 7;
+        /* MAME's tx tilemap uses set_scrolldy(8,8).  This is a display
+         * offset, not a request to sample eight rows later. */
+        int tx_sy = sy - (int)snk.tx_scroll_y;
+        int ty = (tx_sy >> 3) % snk.tx_rows;
+        int py = tx_sy & 7;
+        if (ty < 0) ty += snk.tx_rows;
         int tx;
         uint32_t *dst = snk.framebuf + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
+        uint16_t *idxdst = snk.frameidx + (size_t)sy * SNK_PSYCHOS_FRAME_WIDTH;
 
-        for (tx = 0; tx < (int)snk.tx_cols; tx++, dst += 8)
+        for (tx = 0; tx < (int)snk.tx_cols; tx++, dst += 8, idxdst += 8)
         {
             uint32_t offs = (snk.game_type == SNK_GAME_ATHENA || snk_is_ikari_video_hw()) ? snk_marvins_tx_offset(tx, ty) : ((uint32_t)tx * 32u + (uint32_t)ty);
             uint8_t raw = snk.tx_vram[offs & 0x7ff];
@@ -2018,7 +2063,11 @@ static void snk_draw_tx(void)
             {
                 uint8_t pix = src[i];
                 if (pix != 0x0f)
-                    dst[i] = pal[(local_penbase + pix) & 0x3ff];
+                {
+                    uint16_t pen = (uint16_t)((local_penbase + pix) & 0x3ff);
+                    dst[i] = pal[pen];
+                    idxdst[i] = pen;
+                }
             }
         }
     }
@@ -2043,7 +2092,8 @@ static void snk_draw_sprite_tile(int sx, int sy, int size, uint16_t code, uint16
     {
         const uint8_t *src = tilepix + (size_t)(y - sy) * (size_t)size + (size_t)(xmin - sx);
         uint32_t *dst = snk.framebuf + (size_t)y * SNK_PSYCHOS_FRAME_WIDTH + (size_t)xmin;
-        for (x = xmin; x < xmax; x++, src++, dst++)
+        uint16_t *idxdst = snk.frameidx + (size_t)y * SNK_PSYCHOS_FRAME_WIDTH + (size_t)xmin;
+        for (x = xmin; x < xmax; x++, src++, dst++, idxdst++)
         {
             uint8_t pix = *src;
             if (snk.sprite_bpp == 3)
@@ -2051,8 +2101,17 @@ static void snk_draw_sprite_tile(int sx, int sy, int size, uint16_t code, uint16
                 if (pix == 7)
                     continue;
                 if (pix == 6)
-                    continue; /* shadow pen; compact renderer leaves destination unchanged */
-                *dst = pal[(penbase + pix) & 0x3ff];
+                {
+                    uint16_t shadow = (uint16_t)((*idxdst | 0x200u) & 0x3ffu);
+                    *idxdst = shadow;
+                    *dst = pal[shadow];
+                    continue;
+                }
+                {
+                    uint16_t pen = (uint16_t)((penbase + pix) & 0x3ff);
+                    *idxdst = pen;
+                    *dst = pal[pen];
+                }
             }
             else if (snk.game_type == SNK_GAME_TDFEVER)
             {
@@ -2060,18 +2119,29 @@ static void snk_draw_sprite_tile(int sx, int sy, int size, uint16_t code, uint16
                     continue;
                 if (pix == 14)
                 {
-                    /* TD Fever uses palette shadows: only tilemap colors 0x200-0x2ff
-                     * are affected, becoming 0x300-0x3ff.  Source index is not
-                     * available after RGB lookup, so approximate by using the same
-                     * RGB value for non-bg entries and leave the pixel unchanged here. */
+                    uint16_t shadow = *idxdst;
+                    if (shadow >= 0x200 && shadow < 0x300)
+                    {
+                        shadow = (uint16_t)(shadow + 0x100);
+                        *idxdst = shadow;
+                        *dst = pal[shadow];
+                    }
                     continue;
                 }
-                *dst = pal[(penbase + pix) & 0x3ff];
+                {
+                    uint16_t pen = (uint16_t)((penbase + pix) & 0x3ff);
+                    *idxdst = pen;
+                    *dst = pal[pen];
+                }
             }
             else
             {
                 if (pix != 0x0f)
-                    *dst = pal[(penbase + pix) & 0x3ff];
+                {
+                    uint16_t pen = (uint16_t)((penbase + pix) & 0x3ff);
+                    *idxdst = pen;
+                    *dst = pal[pen];
+                }
             }
         }
     }
@@ -2175,7 +2245,7 @@ static int snk_can_render_direct(void)
 static void snk_render(void)
 {
     int direct;
-    if (!bitmap.data || !snk.framebuf_shadow) return;
+    if (!bitmap.data || !snk.framebuf_shadow || !snk.frameidx_shadow) return;
     bitmap.viewport.x = 0;
     bitmap.viewport.y = 0;
     bitmap.viewport.w = (snk.rotate == SNK_ROT_NONE) ? snk.crop_w : snk.crop_h;
@@ -2189,9 +2259,11 @@ static void snk_render(void)
 #else
     snk.framebuf = snk.framebuf_shadow;
 #endif
+    snk.frameidx = snk.frameidx_shadow;
 
     if (!direct)
         memset(snk.framebuf, 0, (size_t)SNK_PSYCHOS_FRAME_WIDTH * SNK_PSYCHOS_FRAME_HEIGHT * sizeof(uint32_t));
+    memset(snk.frameidx, 0, (size_t)SNK_PSYCHOS_FRAME_WIDTH * SNK_PSYCHOS_FRAME_HEIGHT * sizeof(uint16_t));
 
     snk_draw_bg();
     if (snk.game_type == SNK_GAME_ATHENA)
@@ -2201,7 +2273,9 @@ static void snk_render(void)
     else if (snk_is_ikari_video_hw())
     {
         snk_draw_sprites_group(snk.spriteram + 0x800, 2, 0, 25);
-        snk_draw_sprites_group(snk.spriteram,         3, 0, 32);
+        /* MAME ikari_draw_sprites() always draws 25 entries per call; the
+         * 32x32 bank is not a 32-entry list on this hardware. */
+        snk_draw_sprites_group(snk.spriteram,         3, 0, 25);
         snk_draw_sprites_group(snk.spriteram + 0x800, 2, 25, 50);
     }
     else if (snk.game_type == SNK_GAME_TDFEVER)

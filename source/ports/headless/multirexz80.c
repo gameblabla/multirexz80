@@ -150,8 +150,9 @@ static void apply_extension_console_hint(const char *path)
 {
     const char *ext = path_ext(path);
     if (option.console != 0) return;
-    if (!strcasecmp(ext, ".col")) option.console = 6;
+    if (!strcasecmp(ext, ".col") || !strcasecmp(ext, ".cv")) option.console = 6;
     else if (!strcasecmp(ext, ".gg")) option.console = 3;
+    else if (!strcasecmp(ext, ".sg")) option.console = 5;
     else if (!strcasecmp(ext, ".m5")) option.console = 7;
 }
 

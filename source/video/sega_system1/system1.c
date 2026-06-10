@@ -73,6 +73,9 @@ typedef struct
     uint16_t *sprite_line;
     uint8_t *mix_collision;
     uint8_t *sprite_collision;
+    uint8_t mix_collision_summary;
+    uint8_t sprite_collision_summary;
+    uint16_t collision_partial_line;
     uint8_t bank;
     uint8_t video_mode;
     uint8_t vram_bank;
@@ -99,6 +102,9 @@ typedef struct
 } system1_state_t;
 
 static system1_state_t s1;
+
+static void system1_update_collisions_now(void);
+static uint8_t system1_collision_r_value(const uint8_t *ram, uint16_t offset, uint8_t summary);
 
 static uint8_t *xcalloc(size_t n, size_t s)
 {
@@ -520,6 +526,9 @@ void system1_memory_map(int clear_ram)
         memset(s1.sound_ram, 0, SYSTEM1_SOUND_RAM_SIZE);
         memset(s1.mix_collision, 0, SYSTEM1_MIXCOL_SIZE);
         memset(s1.sprite_collision, 0, SYSTEM1_SPRCOL_SIZE);
+        s1.mix_collision_summary = 0;
+        s1.sprite_collision_summary = 0;
+        s1.collision_partial_line = 0;
         s1.bank = s1.video_mode = s1.vram_bank = s1.sound_latch = 0;
         s1.sound_nmi_asserted = s1.sound_irq_asserted = 0;
     }
@@ -570,14 +579,12 @@ uint8_t system1_readmem(uint16_t address)
         }
         if (address < 0xc000)
             return s1.data_readmap[address >> 10][address & 0x03ff];
-        if (address < 0xc400)
-            return s1.mix_collision[(address - 0xc000) & (SYSTEM1_MIXCOL_SIZE - 1)] ? 0xff : 0x7f;
+        if (address < 0xc400) { system1_update_collisions_now(); return system1_collision_r_value(s1.mix_collision, (uint16_t)((address - 0xc000) & (SYSTEM1_MIXCOL_SIZE - 1)), s1.mix_collision_summary); }
         if (address < 0xc800)
-            return (s1.mix_collision[0] ? 0xff : 0x7f);
-        if (address < 0xcc00)
-            return s1.sprite_collision[(address - 0xc800) & (SYSTEM1_SPRCOL_SIZE - 1)] ? 0xff : 0x7f;
+            return 0xff;
+        if (address < 0xcc00) { system1_update_collisions_now(); return system1_collision_r_value(s1.sprite_collision, (uint16_t)((address - 0xc800) & (SYSTEM1_SPRCOL_SIZE - 1)), s1.sprite_collision_summary); }
         if (address < 0xd000)
-            return (s1.sprite_collision[0] ? 0xff : 0x7f);
+            return 0xff;
         if (address < 0xd800)
             return s1.spriteram[address & 0x07ff];
         if (address < 0xe000)
@@ -597,13 +604,11 @@ uint8_t system1_readmem(uint16_t address)
         uint32_t bank = (uint32_t)((s1.vram_bank >> 1) % ((s1.tilemap_pages > 1) ? (s1.tilemap_pages / 2) : 1));
         return s1.videoram[(bank << 12) | (address & 0x0fff)];
     }
-    if (address < 0xf400)
-        return s1.mix_collision[(address - 0xf000) & (SYSTEM1_MIXCOL_SIZE - 1)] ? 0xff : 0x7f;
+    if (address < 0xf400) { system1_update_collisions_now(); return system1_collision_r_value(s1.mix_collision, (uint16_t)((address - 0xf000) & (SYSTEM1_MIXCOL_SIZE - 1)), s1.mix_collision_summary); }
     if (address < 0xf800)
-        return (s1.mix_collision[0] ? 0xff : 0x7f);
-    if (address < 0xfc00)
-        return s1.sprite_collision[(address - 0xf800) & (SYSTEM1_SPRCOL_SIZE - 1)] ? 0xff : 0x7f;
-    return (s1.sprite_collision[0] ? 0xff : 0x7f);
+        return 0xff;
+    if (address < 0xfc00) { system1_update_collisions_now(); return system1_collision_r_value(s1.sprite_collision, (uint16_t)((address - 0xf800) & (SYSTEM1_SPRCOL_SIZE - 1)), s1.sprite_collision_summary); }
+    return 0xff;
 }
 
 void system1_writemem(uint16_t address, uint8_t data)
@@ -632,10 +637,10 @@ void system1_writemem(uint16_t address, uint8_t data)
     if (s1.game == 20)
     {
         if (address < 0xc000) return;
-        if (address < 0xc400) { s1.mix_collision[(address - 0xc000) & (SYSTEM1_MIXCOL_SIZE - 1)] = 0; return; }
-        if (address < 0xc800) { memset(s1.mix_collision, 0, SYSTEM1_MIXCOL_SIZE); return; }
-        if (address < 0xcc00) { s1.sprite_collision[(address - 0xc800) & (SYSTEM1_SPRCOL_SIZE - 1)] = 0; return; }
-        if (address < 0xd000) { memset(s1.sprite_collision, 0, SYSTEM1_SPRCOL_SIZE); return; }
+        if (address < 0xc400) { system1_update_collisions_now(); s1.mix_collision[(address - 0xc000) & (SYSTEM1_MIXCOL_SIZE - 1)] = 0; return; }
+        if (address < 0xc800) { system1_update_collisions_now(); s1.mix_collision_summary = 0; return; }
+        if (address < 0xcc00) { system1_update_collisions_now(); s1.sprite_collision[(address - 0xc800) & (SYSTEM1_SPRCOL_SIZE - 1)] = 0; return; }
+        if (address < 0xd000) { system1_update_collisions_now(); s1.sprite_collision_summary = 0; return; }
         if (address < 0xd800) { s1.spriteram[address & 0x07ff] = data; return; }
         if (address < 0xe000)
         {
@@ -662,10 +667,10 @@ void system1_writemem(uint16_t address, uint8_t data)
         return;
     }
     if (address < 0xf000) { uint32_t bank = (uint32_t)((s1.vram_bank >> 1) % ((s1.tilemap_pages > 1) ? (s1.tilemap_pages / 2) : 1)); s1.videoram[(bank << 12) | (address & 0x0fff)] = data; return; }
-    if (address < 0xf400) { s1.mix_collision[(address - 0xf000) & (SYSTEM1_MIXCOL_SIZE - 1)] = 0; return; }
-    if (address < 0xf800) { memset(s1.mix_collision, 0, SYSTEM1_MIXCOL_SIZE); return; }
-    if (address < 0xfc00) { s1.sprite_collision[(address - 0xf800) & (SYSTEM1_SPRCOL_SIZE - 1)] = 0; return; }
-    memset(s1.sprite_collision, 0, SYSTEM1_SPRCOL_SIZE);
+    if (address < 0xf400) { system1_update_collisions_now(); s1.mix_collision[(address - 0xf000) & (SYSTEM1_MIXCOL_SIZE - 1)] = 0; return; }
+    if (address < 0xf800) { system1_update_collisions_now(); s1.mix_collision_summary = 0; return; }
+    if (address < 0xfc00) { system1_update_collisions_now(); s1.sprite_collision[(address - 0xf800) & (SYSTEM1_SPRCOL_SIZE - 1)] = 0; return; }
+    system1_update_collisions_now(); s1.sprite_collision_summary = 0;
 }
 
 static uint8_t system1_player_r(int port)
@@ -818,6 +823,23 @@ static inline uint32_t system1_pen(uint16_t index)
 {
     return s1.pen_cache[index & 0x07ff];
 }
+static uint8_t system1_collision_r_value(const uint8_t *ram, uint16_t offset, uint8_t summary)
+{
+    return (uint8_t)((ram[offset] ? 0x01u : 0x00u) | 0x7eu | (summary ? 0x80u : 0x00u));
+}
+
+static inline void system1_set_mix_collision(uint8_t index)
+{
+    s1.mix_collision[index & (SYSTEM1_MIXCOL_SIZE - 1)] = 1;
+    s1.mix_collision_summary = 1;
+}
+
+static inline void system1_set_sprite_collision(uint16_t index)
+{
+    s1.sprite_collision[index & (SYSTEM1_SPRCOL_SIZE - 1)] = 1;
+    s1.sprite_collision_summary = 1;
+}
+
 
 static void system1_rebuild_tile_cache(void)
 {
@@ -874,10 +896,15 @@ static inline uint16_t tilemap_pixel_from_row(uint16_t base, const uint8_t *rowp
     return (uint16_t)(base | rowpix[x & 7u]);
 }
 
-static void draw_sprites(void)
+static void draw_sprites_range(int min_y, int max_y, int update_collision)
 {
     int spr;
-    memset(s1.sprite_line, 0, (size_t)SYSTEM1_RAW_WIDTH * SYSTEM1_VISIBLE_HEIGHT * sizeof(uint16_t));
+    int clear_y;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= SYSTEM1_VISIBLE_HEIGHT) max_y = SYSTEM1_VISIBLE_HEIGHT - 1;
+    if (max_y < min_y) return;
+    for (clear_y = min_y; clear_y <= max_y; clear_y++)
+        memset(s1.sprite_line + (size_t)clear_y * SYSTEM1_RAW_WIDTH, 0, (size_t)SYSTEM1_RAW_WIDTH * sizeof(uint16_t));
     for (spr = 0; spr < 32; spr++)
     {
         const uint8_t *sd = &s1.spriteram[spr * 0x10];
@@ -897,7 +924,7 @@ static void draw_sprites(void)
             uint16_t cur;
             int addrdelta;
             int x;
-            if (y < 0 || y >= SYSTEM1_VISIBLE_HEIGHT)
+            if (y < min_y || y > max_y)
             {
                 srcaddr = (uint16_t)(srcaddr + stride);
                 continue;
@@ -918,7 +945,12 @@ static void draw_sprites(void)
                     {
                         int effx = x + i;
                         if (effx >= 0 && effx < SYSTEM1_RAW_WIDTH)
-                            s1.sprite_line[(size_t)y * SYSTEM1_RAW_WIDTH + (uint32_t)effx] = (uint16_t)((spr << 4) | c1);
+                        {
+                            uint16_t *dstpix = &s1.sprite_line[(size_t)y * SYSTEM1_RAW_WIDTH + (uint32_t)effx];
+                            if (update_collision && ((*dstpix & 0x0f) != 0))
+                                system1_set_sprite_collision((uint16_t)((((*dstpix >> 4) & 0x1f) + 32 * spr)));
+                            *dstpix = (uint16_t)((spr << 4) | c1);
+                        }
                     }
                 }
                 if (c2 == 0x0f) break;
@@ -929,12 +961,136 @@ static void draw_sprites(void)
                     {
                         int effx = x + 2 + i;
                         if (effx >= 0 && effx < SYSTEM1_RAW_WIDTH)
-                            s1.sprite_line[(size_t)y * SYSTEM1_RAW_WIDTH + (uint32_t)effx] = (uint16_t)((spr << 4) | c2);
+                        {
+                            uint16_t *dstpix = &s1.sprite_line[(size_t)y * SYSTEM1_RAW_WIDTH + (uint32_t)effx];
+                            if (update_collision && ((*dstpix & 0x0f) != 0))
+                                system1_set_sprite_collision((uint16_t)((((*dstpix >> 4) & 0x1f) + 32 * spr)));
+                            *dstpix = (uint16_t)((spr << 4) | c2);
+                        }
                     }
                 }
             }
         }
     }
+}
+
+static void system1_update_collisions_to_line(int target_line)
+{
+    int y, x;
+    uint32_t pages;
+    uint32_t page_mask;
+    int pages_power_of_two;
+    int fgpage;
+    uint32_t fgpage_norm;
+
+    if (target_line < 0) return;
+    if (target_line > SYSTEM1_VISIBLE_HEIGHT) target_line = SYSTEM1_VISIBLE_HEIGHT;
+    if (target_line <= (int)s1.collision_partial_line) return;
+
+    if (s1.tile_cache_dirty || !s1.tile_cache_count)
+        system1_rebuild_tile_cache();
+
+    draw_sprites_range((int)s1.collision_partial_line, target_line - 1, 1);
+
+    pages = s1.tilemap_pages ? s1.tilemap_pages : 2u;
+    page_mask = pages - 1u;
+    pages_power_of_two = ((pages & page_mask) == 0);
+    fgpage = (s1.video_type == 2) ? 0 : 1;
+    fgpage_norm = pages_power_of_two ? ((uint32_t)fgpage & page_mask) : ((uint32_t)fgpage % pages);
+
+    for (y = (int)s1.collision_partial_line; y < target_line; y++)
+    {
+        int screen_y = y;
+        int bgyscroll, xscroll;
+        uint32_t fgy = (uint32_t)screen_y & 0xffu;
+        uint32_t fg_row_base = (fgpage_norm << 11) | (((fgy >> 3) & 0x1fu) << 6);
+        uint32_t fg_pix_y = fgy & 7u;
+        uint32_t bg_pix_y, bg_ty_base;
+        uint32_t fg_last_col = 0xffffffffu;
+        uint32_t bg_last_key = 0xffffffffu;
+        uint16_t fg_base = 0, bg_base = 0;
+        const uint8_t *fg_rowpix = NULL, *bg_rowpix = NULL;
+        const uint16_t *sprite_row = s1.sprite_line + (size_t)y * SYSTEM1_RAW_WIDTH;
+
+        if (s1.video_type == 2)
+        {
+            bgyscroll = s1.videoram[0x07ba];
+            if (s1.rowscroll)
+            {
+                uint32_t rowoffs = 0x07c0u + ((((uint32_t)screen_y >> 3) & 0x1f) * 2u);
+                xscroll = (((int)((uint16_t)s1.videoram[rowoffs] | ((uint16_t)s1.videoram[rowoffs + 1] << 8))) & 0x1ff) - 512 + 10;
+            }
+            else
+            {
+                xscroll = (((int)((uint16_t)s1.videoram[0x07c0] | ((uint16_t)s1.videoram[0x07c1] << 8))) & 0x1ff) - 512 + 10;
+            }
+        }
+        else
+        {
+            bgyscroll = s1.videoram[0x0fbd];
+            xscroll = (int)(int16_t)(((uint16_t)s1.videoram[0x0ffc] | ((uint16_t)s1.videoram[0x0ffd] << 8)) + 28);
+        }
+
+        {
+            uint32_t bgy = (uint32_t)((screen_y + bgyscroll) & 0x1ff);
+            bg_pix_y = bgy & 7u;
+            bg_ty_base = ((bgy >> 3) & 0x1fu) << 6;
+        }
+
+        for (x = 0; x < SYSTEM1_RAW_WIDTH; x += 2)
+        {
+            int bgpage = 0;
+            int bgx;
+            int out_x = x >> 1;
+            uint32_t bgpage_norm;
+            uint32_t bg_key;
+            uint32_t fgx = (uint32_t)out_x & 0xffu;
+            uint32_t fg_col = (fgx >> 3) & 0x1fu;
+            uint16_t bg, fg, sp;
+            uint8_t lookup_index, lookup_value;
+
+            if (fg_col != fg_last_col)
+            {
+                uint32_t fg_off = fg_row_base | (fg_col << 1);
+                tilemap_row_from_offset(fg_off, fg_pix_y, &fg_base, &fg_rowpix);
+                fg_last_col = fg_col;
+            }
+
+            bgx = ((x - xscroll) / 2) & 0x1ff;
+            if (s1.video_type == 2)
+            {
+                int quad = ((((screen_y + bgyscroll) & 0x1ff) >> 8) * 2) + (bgx >> 8);
+                bgpage = s1.videoram[0x0740 + (quad * 2)] & 7;
+            }
+            bgpage_norm = pages_power_of_two ? ((uint32_t)bgpage & page_mask) : ((uint32_t)bgpage % pages);
+            bg_key = (bgpage_norm << 5) | (((uint32_t)bgx >> 3) & 0x1fu);
+            if (bg_key != bg_last_key)
+            {
+                uint32_t bg_off = (bgpage_norm << 11) | bg_ty_base | ((((uint32_t)bgx >> 3) & 0x1fu) << 1);
+                tilemap_row_from_offset(bg_off, bg_pix_y, &bg_base, &bg_rowpix);
+                bg_last_key = bg_key;
+            }
+
+            bg = tilemap_pixel_from_row(bg_base, bg_rowpix, (uint32_t)bgx);
+            fg = tilemap_pixel_from_row(fg_base, fg_rowpix, fgx);
+            sp = sprite_row[(uint32_t)x];
+            lookup_index = (uint8_t)((((sp & 0x0f) == 0) << 0) |
+                           (((fg & 0x07) == 0) << 1) |
+                           (((fg >> 9) & 0x03) << 2) |
+                           (((bg & 0x07) == 0) << 4) |
+                           (((bg >> 9) & 0x03) << 5));
+            lookup_value = s1.prom[lookup_index];
+            if (!(lookup_value & 4))
+                system1_set_mix_collision((uint8_t)(((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)));
+        }
+    }
+    s1.collision_partial_line = (uint16_t)target_line;
+}
+
+static void system1_update_collisions_now(void)
+{
+    int target = (vdp.line < SYSTEM1_VISIBLE_HEIGHT) ? vdp.line : SYSTEM1_VISIBLE_HEIGHT;
+    system1_update_collisions_to_line(target);
 }
 
 static void system1_clear_viewport(void)
@@ -1056,8 +1212,6 @@ static void system1_render_fast_none(void)
                            (((bg & 0x07) == 0) << 4) |
                            (((bg >> 9) & 0x03) << 5));
             lookup_value = s1.prom[lookup_index];
-            if (!(lookup_value & 4) && (sp & 0x0f))
-                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
             switch (lookup_value & 3)
             {
                 default:
@@ -1164,8 +1318,6 @@ static void system1_render_fast_cw(void)
                            (((bg & 0x07) == 0) << 4) |
                            (((bg >> 9) & 0x03) << 5));
             lookup_value = s1.prom[lookup_index];
-            if (!(lookup_value & 4) && (sp & 0x0f))
-                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
             switch (lookup_value & 3)
             {
                 default:
@@ -1273,8 +1425,6 @@ static void system1_render_fast_ccw(void)
                            (((bg & 0x07) == 0) << 4) |
                            (((bg >> 9) & 0x03) << 5));
             lookup_value = s1.prom[lookup_index];
-            if (!(lookup_value & 4) && (sp & 0x0f))
-                s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
             switch (lookup_value & 3)
             {
                 default:
@@ -1316,7 +1466,7 @@ static void system1_render(void)
     if (s1.pen_cache_dirty)
         system1_rebuild_pen_cache();
 
-    draw_sprites();
+    draw_sprites_range(0, SYSTEM1_VISIBLE_HEIGHT - 1, 0);
     if (fast_bounds)
     {
         if (s1.rotate == SYSTEM1_ROTATE_NONE)
@@ -1426,8 +1576,6 @@ static void system1_render(void)
                                (((bg & 0x07) == 0) << 4) |
                                (((bg >> 9) & 0x03) << 5));
                 lookup_value = s1.prom[lookup_index];
-                if (!(lookup_value & 4) && (sp & 0x0f))
-                    s1.mix_collision[((lookup_value & 8) << 2) | ((sp >> 4) & 0x1f)] = 1;
                 switch (lookup_value & 3)
                 {
                     default:
@@ -1531,6 +1679,7 @@ void system1_frame(uint32_t skip_render)
     system1_update_dial_from_dpad();
     vdp.height = SYSTEM1_VISIBLE_HEIGHT;
     vdp.lpf = SYSTEM1_LINES_PER_FRAME;
+    s1.collision_partial_line = 0;
 
     for (line = 0; line < SYSTEM1_LINES_PER_FRAME; line++)
     {
@@ -1545,8 +1694,12 @@ void system1_frame(uint32_t skip_render)
          * visible as incorrect letter colors.  Snapshot the visible field at
          * the start of vblank, before asserting the vblank IRQ.
          */
-        if (line == SYSTEM1_VISIBLE_HEIGHT && !skip_render)
-            system1_render();
+        if (line == SYSTEM1_VISIBLE_HEIGHT)
+        {
+            system1_update_collisions_to_line(SYSTEM1_VISIBLE_HEIGHT);
+            if (!skip_render)
+                system1_render();
+        }
 
         line_z80 += cycles_per_line;
         system1_load_cpu(SYSTEM1_CPU_MAIN);

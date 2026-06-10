@@ -183,6 +183,34 @@ ARCADE_REGRESSION_OUT_DIR ?= test-results/arcade_regression
 test-arcade-regression: $(PRGNAME)
 	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(ARCADE_REGRESSION_ROM_DIR) --out-dir $(ARCADE_REGRESSION_OUT_DIR) --games blockgal blockgalb choplift flicky gardia teddybb tetrisse transfrm drift2 psychos ikari athena
 
+IKARI_TITLE_ROM ?= roms/ikari.zip
+IKARI_TITLE_OUT_DIR ?= test-results/ikari_title
+IKARI_TITLE_FRAMES ?= 593
+
+test-ikari-title: $(PRGNAME)
+	python3 source/tests/ikari_title_regression.py --binary ./$(PRGNAME) --rom "$(IKARI_TITLE_ROM)" --out-dir $(IKARI_TITLE_OUT_DIR) --frames $(IKARI_TITLE_FRAMES)
+
+ATHENA_ATTRACT_ROM ?= roms/athena.zip
+ATHENA_ATTRACT_OUT_DIR ?= test-results/athena_attract
+ATHENA_ATTRACT_FRAMES ?= 951
+ATHENA_ATTRACT_MAME_VIDEO ?=
+ATHENA_ATTRACT_MAME_FRAME ?= 960
+
+test-athena-attract: $(PRGNAME)
+	python3 source/tests/athena_attract_regression.py --binary ./$(PRGNAME) --rom "$(ATHENA_ATTRACT_ROM)" --out-dir $(ATHENA_ATTRACT_OUT_DIR) --frames $(ATHENA_ATTRACT_FRAMES) $(if $(ATHENA_ATTRACT_MAME_VIDEO),--mame-video "$(ATHENA_ATTRACT_MAME_VIDEO)" --mame-frame $(ATHENA_ATTRACT_MAME_FRAME),)
+
+FLICKY_GAMEPLAY_ROM ?= roms/flicky.zip
+FLICKY_GAMEPLAY_OUT_DIR ?= test-results/flicky_gameplay
+FLICKY_GAMEPLAY_FRAMES ?= 1440
+FLICKY_GAMEPLAY_MAME_VIDEO ?=
+FLICKY_GAMEPLAY_MAME_FRAME ?= 1440
+
+test-flicky-gameplay: $(PRGNAME)
+	python3 source/tests/flicky_gameplay_regression.py --binary ./$(PRGNAME) --rom "$(FLICKY_GAMEPLAY_ROM)" --out-dir $(FLICKY_GAMEPLAY_OUT_DIR) --frames $(FLICKY_GAMEPLAY_FRAMES) $(if $(FLICKY_GAMEPLAY_MAME_VIDEO),--mame-video "$(FLICKY_GAMEPLAY_MAME_VIDEO)" --mame-frame $(FLICKY_GAMEPLAY_MAME_FRAME),)
+
+SONIC_DRIFT2_GG_ROM_DIR ?= roms
+SONIC_DRIFT2_GG_OUT_DIR ?= test-results/sonic_drift2_gg
+
 test-sonic-drift2-gg: $(PRGNAME)
 	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(SONIC_DRIFT2_GG_ROM_DIR) --out-dir $(SONIC_DRIFT2_GG_OUT_DIR) --games sonic_drift2_gg
 
@@ -238,3 +266,16 @@ COLECO_MULTI_SPRITES_FRAMES ?= 120
 
 test-coleco-multi-sprites: $(PRGNAME)
 	python3 source/tests/coleco_multi_sprites_regression.py --binary ./$(PRGNAME) --rom "$(COLECO_MULTI_SPRITES_ROM)" --bios "$(COLECO_MULTI_SPRITES_BIOS)" --out-dir $(COLECO_MULTI_SPRITES_OUT_DIR) --frames $(COLECO_MULTI_SPRITES_FRAMES)
+
+
+TEST_ALL_ROM_DIR ?= roms
+TEST_ALL_OUT_DIR ?= test-results/all
+TEST_ALL_TIMEOUT ?= 300
+TEST_ALL_JOBS ?= 1
+TEST_ALL_COLECO_BIOS ?=
+TEST_ALL_TARGETS ?=
+
+.PHONY: test-all
+
+test-all: $(PRGNAME)
+	python3 source/tests/run_all_headless_tests.py --root . --makefile Makefile.headless --rom-dir "$(TEST_ALL_ROM_DIR)" --out-dir "$(TEST_ALL_OUT_DIR)" --timeout $(TEST_ALL_TIMEOUT) $(if $(TEST_ALL_COLECO_BIOS),--coleco-bios "$(TEST_ALL_COLECO_BIOS)",) --jobs $(TEST_ALL_JOBS) $(if $(TEST_ALL_TARGETS),--targets $(TEST_ALL_TARGETS),)

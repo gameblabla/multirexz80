@@ -263,17 +263,40 @@ static void mame_internal_tick(void)
     }
 }
 
-static void advance_to_output_sample(void)
+static void mame_current_output(int32_t *left, int32_t *right)
 {
-    if (PSG.m_internal_samples_per_output <= 0.0)
-        return;
+    int32_t out;
+    int32_t out2;
 
-    PSG.m_internal_sample_phase += PSG.m_internal_samples_per_output;
-    while (PSG.m_internal_sample_phase >= 1.0)
+    if (PSG.m_stereo)
     {
-        mame_internal_tick();
-        PSG.m_internal_sample_phase -= 1.0;
+        out = ((((PSG.m_stereo_mask & 0x10) != 0) && PSG.m_output[0]) ? PSG.m_volume[0] : 0)
+            + ((((PSG.m_stereo_mask & 0x20) != 0) && PSG.m_output[1]) ? PSG.m_volume[1] : 0)
+            + ((((PSG.m_stereo_mask & 0x40) != 0) && PSG.m_output[2]) ? PSG.m_volume[2] : 0)
+            + ((((PSG.m_stereo_mask & 0x80) != 0) && PSG.m_output[3]) ? PSG.m_volume[3] : 0);
+
+        out2 = ((((PSG.m_stereo_mask & 0x01) != 0) && PSG.m_output[0]) ? PSG.m_volume[0] : 0)
+             + ((((PSG.m_stereo_mask & 0x02) != 0) && PSG.m_output[1]) ? PSG.m_volume[1] : 0)
+             + ((((PSG.m_stereo_mask & 0x04) != 0) && PSG.m_output[2]) ? PSG.m_volume[2] : 0)
+             + ((((PSG.m_stereo_mask & 0x08) != 0) && PSG.m_output[3]) ? PSG.m_volume[3] : 0);
     }
+    else
+    {
+        out = (PSG.m_output[0] ? PSG.m_volume[0] : 0)
+            + (PSG.m_output[1] ? PSG.m_volume[1] : 0)
+            + (PSG.m_output[2] ? PSG.m_volume[2] : 0)
+            + (PSG.m_output[3] ? PSG.m_volume[3] : 0);
+        out2 = out;
+    }
+
+    if (PSG.m_negate)
+    {
+        out = -out;
+        out2 = -out2;
+    }
+
+    *left = out;
+    *right = out2;
 }
 
 void SN76489_Update(int16_t **outputs, int samples)
@@ -283,39 +306,35 @@ void SN76489_Update(int16_t **outputs, int samples)
 
     while (samples-- > 0)
     {
-        int32_t out = 0;
-        int32_t out2 = 0;
+        int32_t tick_count;
+        int64_t acc_l = 0;
+        int64_t acc_r = 0;
+        int32_t i;
 
-        advance_to_output_sample();
-
-        if (PSG.m_stereo)
+        if (PSG.m_internal_samples_per_output <= 0.0)
         {
-            out = ((((PSG.m_stereo_mask & 0x10) != 0) && PSG.m_output[0]) ? PSG.m_volume[0] : 0)
-                + ((((PSG.m_stereo_mask & 0x20) != 0) && PSG.m_output[1]) ? PSG.m_volume[1] : 0)
-                + ((((PSG.m_stereo_mask & 0x40) != 0) && PSG.m_output[2]) ? PSG.m_volume[2] : 0)
-                + ((((PSG.m_stereo_mask & 0x80) != 0) && PSG.m_output[3]) ? PSG.m_volume[3] : 0);
-
-            out2 = ((((PSG.m_stereo_mask & 0x01) != 0) && PSG.m_output[0]) ? PSG.m_volume[0] : 0)
-                 + ((((PSG.m_stereo_mask & 0x02) != 0) && PSG.m_output[1]) ? PSG.m_volume[1] : 0)
-                 + ((((PSG.m_stereo_mask & 0x04) != 0) && PSG.m_output[2]) ? PSG.m_volume[2] : 0)
-                 + ((((PSG.m_stereo_mask & 0x08) != 0) && PSG.m_output[3]) ? PSG.m_volume[3] : 0);
-        }
-        else
-        {
-            out = (PSG.m_output[0] ? PSG.m_volume[0] : 0)
-                + (PSG.m_output[1] ? PSG.m_volume[1] : 0)
-                + (PSG.m_output[2] ? PSG.m_volume[2] : 0)
-                + (PSG.m_output[3] ? PSG.m_volume[3] : 0);
-            out2 = out;
+            int32_t out, out2;
+            mame_current_output(&out, &out2);
+            *(lbuffer++) = (int16_t)out;
+            *(rbuffer++) = (int16_t)out2;
+            continue;
         }
 
-        if (PSG.m_negate)
+        PSG.m_internal_sample_phase += PSG.m_internal_samples_per_output;
+        tick_count = (int32_t)PSG.m_internal_sample_phase;
+        PSG.m_internal_sample_phase -= (double)tick_count;
+        if (tick_count < 1) tick_count = 1;
+
+        for (i = 0; i < tick_count; i++)
         {
-            out = -out;
-            out2 = -out2;
+            int32_t out, out2;
+            mame_internal_tick();
+            mame_current_output(&out, &out2);
+            acc_l += out;
+            acc_r += out2;
         }
 
-        *(lbuffer++) = (int16_t)out;
-        *(rbuffer++) = (int16_t)out2;
+        *(lbuffer++) = (int16_t)(acc_l / tick_count);
+        *(rbuffer++) = (int16_t)(acc_r / tick_count);
     }
 }

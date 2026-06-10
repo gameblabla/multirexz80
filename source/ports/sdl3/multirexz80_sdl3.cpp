@@ -305,7 +305,8 @@ struct AppState
     std::string coleco_bios_path;
     std::string resolved_bios_path;
     std::string status;
-    uint8_t requested_console = 0;
+    int console_choice = 0;      // kConsoleChoices index; 0 means Auto.
+    int video_mode = 0;          // 0=Auto, 1=PAL 50 Hz, 2=NTSC 60 Hz.
     bool running = true;
     bool rom_loaded = false;
     bool paused = false;
@@ -590,6 +591,65 @@ static const char *ext_of(const std::string &path)
     return dot ? dot : "";
 }
 
+struct ConsoleChoice
+{
+    const char *label;
+    const char *cli_name;
+    uint8_t option_console;
+    uint8_t auto_country;   // Used only when video mode is Auto.  0 leaves CRC/header detection in control.
+};
+
+static constexpr ConsoleChoice kConsoleChoices[] = {
+    {"Auto (extension/CRC/ZIP set)", "auto", 0, 0},
+    {"ColecoVision", "coleco", 6, 0},
+    {"SG-1000", "sg1000", 5, 0},
+    {"Sord M5", "sordm5", 7, 0},
+    {"Master System 1 JP", "sms1jp", 1, 3},
+    {"Master System 1 EU/US", "sms1", 1, 0},
+    {"Master System 2", "sms2", 2, 0},
+    {"Game Gear", "gg", 3, 0},
+    {"Game Gear SMS compatibility", "ggsms", 4, 0},
+    {"Sega System E", "systeme", 8, 0},
+    {"Sega System 1/2", "system1", 9, 0},
+    {"SNK Ikari/Psychos", "snk", 10, 0},
+};
+
+static constexpr const char *kVideoModeLabels[] = {
+    "Auto",
+    "PAL 50 Hz",
+    "NTSC 60 Hz",
+};
+
+static bool ext_equal(const char *ext, const char *wanted)
+{
+    return ext && wanted && SDL_strcasecmp(ext, wanted) == 0;
+}
+
+static const char *runtime_console_name(uint8_t console)
+{
+    switch (console)
+    {
+        case CONSOLE_SMS: return "Master System 1";
+        case CONSOLE_SMS2: return "Master System 2";
+        case CONSOLE_GG: return "Game Gear";
+        case CONSOLE_GGMS: return "Game Gear SMS compatibility";
+        case CONSOLE_SG1000: return "SG-1000";
+        case CONSOLE_SC3000: return "SC-3000";
+        case CONSOLE_SF7000: return "SF-7000";
+        case CONSOLE_COLECO: return "ColecoVision";
+        case CONSOLE_SORDM5: return "Sord M5";
+        case CONSOLE_SYSTEME: return "Sega System E";
+        case CONSOLE_SYSTEM1: return "Sega System 1/2";
+        case CONSOLE_SNKPSYCHOS: return "SNK Ikari/Psychos";
+        default: return "Unknown";
+    }
+}
+
+static const char *runtime_display_name(uint8_t display)
+{
+    return display == DISPLAY_PAL ? "PAL 50 Hz" : "NTSC 60 Hz";
+}
+
 static std::filesystem::path user_multirexz80_dir()
 {
 #ifdef MULTIREXZ80_PORTABLE
@@ -718,25 +778,57 @@ static void save_sdl3_config(const AppState &app)
 static void set_console_from_path(const std::string &path)
 {
     const char *ext = ext_of(path);
-    if (!SDL_strcasecmp(ext, ".m5")) option.console = 7;
-    else if (!SDL_strcasecmp(ext, ".col")) option.console = 6;
-    else if (!SDL_strcasecmp(ext, ".gg")) option.console = 3;
+    if (ext_equal(ext, ".m5")) option.console = 7;
+    else if (ext_equal(ext, ".col") || ext_equal(ext, ".cv")) option.console = 6;
+    else if (ext_equal(ext, ".gg")) option.console = 3;
+    else if (ext_equal(ext, ".sg")) option.console = 5;
 }
 
-static uint8_t console_option_from_name(const char *name)
+static int console_choice_from_name(const char *name)
 {
-    if (!name) return 0;
-    if (!SDL_strcasecmp(name, "sordm5") || !SDL_strcasecmp(name, "m5")) return 7;
-    if (!SDL_strcasecmp(name, "systeme") || !SDL_strcasecmp(name, "segae")) return 8;
-    if (!SDL_strcasecmp(name, "system1") || !SDL_strcasecmp(name, "segas1") || !SDL_strcasecmp(name, "sega1")) return 9;
-    if (!SDL_strcasecmp(name, "psychos") || !SDL_strcasecmp(name, "snkpsychos") || !SDL_strcasecmp(name, "snk")) return 10;
-    if (!SDL_strcasecmp(name, "coleco") || !SDL_strcasecmp(name, "colecovision")) return 6;
-    if (!SDL_strcasecmp(name, "gg")) return 3;
-    if (!SDL_strcasecmp(name, "ggms") || !SDL_strcasecmp(name, "ggsms")) return 4;
-    if (!SDL_strcasecmp(name, "sg") || !SDL_strcasecmp(name, "sg1000")) return 5;
-    if (!SDL_strcasecmp(name, "sms2")) return 2;
-    if (!SDL_strcasecmp(name, "sms")) return 1;
-    return 0;
+    if (!name) return -1;
+    for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kConsoleChoices)); i++)
+    {
+        if (!SDL_strcasecmp(name, kConsoleChoices[i].cli_name)) return i;
+    }
+    if (!SDL_strcasecmp(name, "sms") || !SDL_strcasecmp(name, "sms1export") || !SDL_strcasecmp(name, "sms1us") || !SDL_strcasecmp(name, "sms1eu")) return 5;
+    if (!SDL_strcasecmp(name, "jp") || !SDL_strcasecmp(name, "smsjp") || !SDL_strcasecmp(name, "sms1japan")) return 4;
+    if (!SDL_strcasecmp(name, "sordm5") || !SDL_strcasecmp(name, "m5")) return 3;
+    if (!SDL_strcasecmp(name, "systeme") || !SDL_strcasecmp(name, "segae")) return 9;
+    if (!SDL_strcasecmp(name, "system1") || !SDL_strcasecmp(name, "segas1") || !SDL_strcasecmp(name, "sega1") || !SDL_strcasecmp(name, "system2")) return 10;
+    if (!SDL_strcasecmp(name, "psychos") || !SDL_strcasecmp(name, "snkpsychos") || !SDL_strcasecmp(name, "ikari")) return 11;
+    if (!SDL_strcasecmp(name, "coleco") || !SDL_strcasecmp(name, "colecovision") || !SDL_strcasecmp(name, "cv")) return 1;
+    if (!SDL_strcasecmp(name, "ggms") || !SDL_strcasecmp(name, "ggsms")) return 8;
+    if (!SDL_strcasecmp(name, "gg")) return 7;
+    if (!SDL_strcasecmp(name, "sg") || !SDL_strcasecmp(name, "sg1000")) return 2;
+    if (!SDL_strcasecmp(name, "sms2")) return 6;
+    return -1;
+}
+
+static int video_mode_from_name(const char *name)
+{
+    if (!name) return -1;
+    if (!SDL_strcasecmp(name, "auto")) return 0;
+    if (!SDL_strcasecmp(name, "pal") || !SDL_strcasecmp(name, "50") || !SDL_strcasecmp(name, "50hz") || !SDL_strcasecmp(name, "europe")) return 1;
+    if (!SDL_strcasecmp(name, "ntsc") || !SDL_strcasecmp(name, "60") || !SDL_strcasecmp(name, "60hz") || !SDL_strcasecmp(name, "usa") || !SDL_strcasecmp(name, "us")) return 2;
+    return -1;
+}
+
+static void apply_requested_machine_options(const AppState &app, const std::string &path)
+{
+    const ConsoleChoice &choice = kConsoleChoices[std::clamp(app.console_choice, 0, static_cast<int>(IM_ARRAYSIZE(kConsoleChoices)) - 1)];
+
+    option.console = choice.option_console;
+    option.country = 0;
+    if (option.console == 0)
+        set_console_from_path(path);
+
+    if (app.video_mode == 1)
+        option.country = 2;      // PAL/export
+    else if (app.video_mode == 2)
+        option.country = 1;      // NTSC/export
+    else if (choice.auto_country != 0)
+        option.country = choice.auto_country;
 }
 
 static bool load_exact(const std::string &path, uint8_t *dst, size_t dst_size, size_t min_size, size_t *actual = nullptr)
@@ -1394,8 +1486,7 @@ static bool load_game(AppState &app, const std::string &path)
     }
 
     set_defaults();
-    if (app.requested_console) option.console = app.requested_console;
-    else set_console_from_path(path);
+    apply_requested_machine_options(app, path);
     std::snprintf(option.game_name, sizeof(option.game_name), "%s", path.c_str());
     if (!load_rom(const_cast<char *>(path.c_str())))
     {
@@ -1438,7 +1529,7 @@ static bool load_game(AppState &app, const std::string &path)
     clear_rewind_buffer(app);
     ensure_state_dir(app.state_dir);
     invalidate_state_thumbnail(app);
-    app.status = "Loaded " + path;
+    app.status = "Loaded " + path + " [" + runtime_console_name(sms.console) + ", " + runtime_display_name(sms.display) + "]";
     sdl3_update_window_title(app);
     return true;
 }
@@ -1825,11 +1916,22 @@ static void parse_args(AppState &app, int argc, char **argv)
         {
             if (const char *v = need(a))
             {
-                app.requested_console = console_option_from_name(v);
-                if (!app.requested_console)
+                int choice = console_choice_from_name(v);
+                if (choice < 0)
                     std::fprintf(stderr, "Unknown console '%s'\n", v);
                 else
-                    option.console = app.requested_console;
+                    app.console_choice = choice;
+            }
+        }
+        else if (!std::strcmp(a, "--video-mode") || !std::strcmp(a, "--region"))
+        {
+            if (const char *v = need(a))
+            {
+                int mode = video_mode_from_name(v);
+                if (mode < 0)
+                    std::fprintf(stderr, "Unknown video mode '%s'\n", v);
+                else
+                    app.video_mode = mode;
             }
         }
         else if (!std::strcmp(a, "--fullscreen")) app.ui.fullscreen = true;
@@ -1960,14 +2062,21 @@ static void render_core(AppState &app)
         draw_lightgun_cursor_overlay(app, dst, active_w, active_h);
 }
 
+static bool browser_rom_extension_supported(const std::filesystem::path &path)
+{
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return ext == ".sms" || ext == ".gg" || ext == ".sg" || ext == ".sc" || ext == ".sf" ||
+           ext == ".col" || ext == ".cv" || ext == ".m5" || ext == ".bin" || ext == ".rom" || ext == ".zip";
+}
+
 static std::vector<std::filesystem::directory_entry> list_browser(const std::filesystem::path &dir)
 {
     std::vector<std::filesystem::directory_entry> entries;
     std::error_code ec;
     for (auto &e : std::filesystem::directory_iterator(dir, ec))
     {
-        if (e.is_directory() || e.path().extension() == ".sms" || e.path().extension() == ".gg" ||
-            e.path().extension() == ".sg" || e.path().extension() == ".col" || e.path().extension() == ".m5" || e.path().extension() == ".bin")
+        if (e.is_directory() || browser_rom_extension_supported(e.path()))
             entries.push_back(e);
     }
     std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) {
@@ -2279,6 +2388,16 @@ static void draw_menu(AppState &app)
         if (ImGui::BeginTabItem("States")) { draw_states(app); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Video"))
         {
+            int video_mode = app.video_mode;
+            if (ImGui::Combo("Video mode", &video_mode, kVideoModeLabels, IM_ARRAYSIZE(kVideoModeLabels)))
+            {
+                app.video_mode = video_mode;
+                if (app.rom_loaded && !app.rom_path.empty())
+                {
+                    std::string reload_path = app.rom_path;
+                    load_game(app, reload_path);
+                }
+            }
             static const char *scaling_modes[] = {"Keep aspect ratio", "Stretch to window"};
             int scaling_mode = scaling_mode_index(app.ui);
             if (ImGui::Combo("Scaling", &scaling_mode, scaling_modes, IM_ARRAYSIZE(scaling_modes)))
@@ -2304,7 +2423,34 @@ static void draw_menu(AppState &app)
                                     (!app.coleco_bios_path.empty() ? app.coleco_bios_path.c_str() :
                                      (!app.bios_path.empty() ? app.bios_path.c_str() : "<auto/default>"));
             ImGui::Text("BIOS: %s", bios_text);
-            ImGui::Text("Console: %u", sms.console);
+            int console_choice = std::clamp(app.console_choice, 0, static_cast<int>(IM_ARRAYSIZE(kConsoleChoices)) - 1);
+            bool console_changed = false;
+            if (ImGui::BeginCombo("Console type", kConsoleChoices[console_choice].label))
+            {
+                for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kConsoleChoices)); i++)
+                {
+                    const bool selected = (i == console_choice);
+                    if (ImGui::Selectable(kConsoleChoices[i].label, selected))
+                    {
+                        console_choice = i;
+                        console_changed = true;
+                    }
+                    if (selected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            if (console_changed)
+            {
+                app.console_choice = console_choice;
+                if (app.rom_loaded && !app.rom_path.empty())
+                {
+                    std::string reload_path = app.rom_path;
+                    load_game(app, reload_path);
+                }
+            }
+            ImGui::Text("Runtime: %s, %s, territory=%s", runtime_console_name(sms.console), runtime_display_name(sms.display),
+                        sms.territory == TERRITORY_DOMESTIC ? "JP/domestic" : "export");
             if (ImGui::Button(app.paused ? "Resume" : "Pause")) app.paused = !app.paused;
             ImGui::SameLine();
             if (ImGui::Button("Reset") && app.rom_loaded) { system_reset(); sdl3_clear_audio_queue(app); }
