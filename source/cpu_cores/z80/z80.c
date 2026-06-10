@@ -383,6 +383,13 @@ static const uint8_t cc_ex[0x100] = {
 	6, 0, 0, 0, 7, 0, 0, 2, 6, 0, 0, 0, 7, 0, 0, 2
 };
 
+#define Z80_M1_WAIT_MAX_CYCLES 8
+static uint8_t cc_op_m1[0x100];
+static uint8_t cc_cb_m1[0x100];
+static uint8_t cc_ed_m1[0x100];
+static uint8_t cc_xy_m1[0x100];
+static uint8_t cc_ex_m1[0x100];
+static int32_t z80_active_m1_wait_cycles = 0;
 static const uint8_t *cc[6];
 #define Z80_TABLE_dd  Z80_TABLE_xy
 #define Z80_TABLE_fd  Z80_TABLE_xy
@@ -3587,12 +3594,7 @@ void z80_init(int32_t (*irqcallback)(int32_t))
 	}
 	
 	/* setup cycle tables */
-	cc[Z80_TABLE_op] = cc_op;
-	cc[Z80_TABLE_cb] = cc_cb;
-	cc[Z80_TABLE_ed] = cc_ed;
-	cc[Z80_TABLE_xy] = cc_xy;
-	cc[Z80_TABLE_xycb] = cc_xycb;
-	cc[Z80_TABLE_ex] = cc_ex;
+	z80_set_m1_wait_cycles(z80_active_m1_wait_cycles);
 }
 
 /****************************************************************************
@@ -3699,6 +3701,52 @@ void z80_set_irq_line(int32_t inputnum, int32_t state)
 void z80_reset_cycle_count(void)
 {
 	Z80_CYCLE_COUNT = 0;
+}
+
+static void z80_build_m1_wait_tables(int32_t cycles)
+{
+	for (int32_t i = 0; i < 0x100; i++)
+	{
+		/* One M1 wait applies to every opcode fetch.  Primary opcode
+		 * fetches are charged through cc_op; CB/ED/DD/FD secondary opcode
+		 * fetches are charged through their secondary tables.  DD/FD CB's
+		 * displacement and final operation byte are fetched by arg(), not
+		 * rop(), so cc_xycb is intentionally not adjusted. */
+		cc_op_m1[i] = (uint8_t)(cc_op[i] + cycles);
+		cc_cb_m1[i] = (uint8_t)(cc_cb[i] + cycles);
+		cc_ed_m1[i] = (uint8_t)(cc_ed[i] + cycles);
+		cc_xy_m1[i] = (uint8_t)(cc_xy[i] + cycles);
+		cc_ex_m1[i] = cc_ex[i];
+	}
+}
+
+void z80_set_m1_wait_cycles(int32_t cycles)
+{
+	if (cycles < 0)
+		cycles = 0;
+	if (cycles > Z80_M1_WAIT_MAX_CYCLES)
+		cycles = Z80_M1_WAIT_MAX_CYCLES;
+
+	z80_active_m1_wait_cycles = cycles;
+
+	if (cycles == 0)
+	{
+		cc[Z80_TABLE_op] = cc_op;
+		cc[Z80_TABLE_cb] = cc_cb;
+		cc[Z80_TABLE_ed] = cc_ed;
+		cc[Z80_TABLE_xy] = cc_xy;
+		cc[Z80_TABLE_xycb] = cc_xycb;
+		cc[Z80_TABLE_ex] = cc_ex;
+		return;
+	}
+
+	z80_build_m1_wait_tables(cycles);
+	cc[Z80_TABLE_op] = cc_op_m1;
+	cc[Z80_TABLE_cb] = cc_cb_m1;
+	cc[Z80_TABLE_ed] = cc_ed_m1;
+	cc[Z80_TABLE_xy] = cc_xy_m1;
+	cc[Z80_TABLE_xycb] = cc_xycb;
+	cc[Z80_TABLE_ex] = cc_ex_m1;
 }
 
 int32_t z80_get_elapsed_cycles(void)

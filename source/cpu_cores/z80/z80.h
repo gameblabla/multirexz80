@@ -83,6 +83,7 @@ void z80_exit (void);
 int32_t z80_execute(int32_t cycles);
 void z80_set_irq_line(int32_t inputnum, int32_t state);
 void z80_reset_cycle_count(void);
+void z80_set_m1_wait_cycles(int32_t cycles);
 int32_t z80_get_elapsed_cycles(void);
 
 /* Optional multi-instance activation used by multi-Z80 arcade drivers.

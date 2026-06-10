@@ -90,18 +90,20 @@ void parse_line(int32_t line)
         p = &sprites[sprites_found];
         sa = &vdp.vram[vdp.sa + (i << 2)];
 
-        /* Fetch Y coordinate */
+        /* Fetch Y coordinate.  TMS9918 sprite Y values encode the
+         * displayed top line minus one; $ff therefore means line 0. */
         yp = sa[0];
 
         /* Check for end marker */
         if(yp == 0xD0)
             goto parse_end;
 
-        /* Wrap Y position */
+        /* Wrap Y position, then convert from encoded Y to display Y. */
         if(yp > 0xE0)
             yp -= 256;
+        yp += 1;
 
-        /* Check if sprite falls on following line */
+        /* Check if sprite falls on this display line */
         if(line >= yp && line < (yp + size))
         {
             /* Sprite overflow on this line */

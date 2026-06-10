@@ -336,6 +336,11 @@ void system_shutdown(void)
 
 void system_reset(void)
 {
+	/* ColecoVision hardware inserts one WAIT state on each Z80 M1
+	 * opcode-fetch cycle.  Timing-sensitive TMS9918 effects, including
+	 * vm_multicolor's active-display R4 changes, rely on this slower
+	 * instruction cadence. */
+	z80_set_m1_wait_cycles((sms.console == CONSOLE_COLECO) ? 1 : 0);
 	sms_reset();
 	pio_reset();
 	vdp_reset();

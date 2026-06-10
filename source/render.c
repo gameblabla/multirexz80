@@ -794,6 +794,13 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 		vdp_request_sprite_overflow(line);
 	}
 
+	/* TMS9918-family sprites are evaluated for the line being drawn.
+	 * Parsing them after rendering makes line 0 consume stale/empty sprite
+	 * state and drops the first visible row of sprites whose encoded Y is
+	 * $ff (display Y=0). */
+	if ((sms.console != CONSOLE_SYSTEME) && (vdp.mode <= 7))
+		parse_line(line);
+
 	/* Vertical borders */
 	if ((vline < top_border) || (vline >= (bitmap.viewport.h + top_border)))
 	{
@@ -870,8 +877,6 @@ static int render_line_to_index_buffer(int chip, int32_t line, uint8_t *dst, int
 			vdp_latch_sprite_mode();
 		if (vdp.mode > 7)
 			parse_satb(line);
-		else
-			parse_line(line);
 	}
 
 	/* Only draw lines within the video output range ! */
