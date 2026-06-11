@@ -26,6 +26,18 @@ ARCADE_CONSOLES: dict[str, str] = {
     "transfrm.zip": "systeme",
     "ikari.zip": "psychos",
     "psychos.zip": "psychos",
+    "psychosj.zip": "psychos",
+    "victroad.zip": "psychos",
+    "dogosoke.zip": "psychos",
+    "dogosokb.zip": "psychos",
+    "gwar.zip": "psychos",
+    "gwarj.zip": "psychos",
+    "chopper.zip": "psychos",
+    "choppera.zip": "psychos",
+    "chopperb.zip": "psychos",
+    "legofair.zip": "psychos",
+    "tdfever.zip": "psychos",
+    "tdfeverj.zip": "psychos",
     "athena.zip": "psychos",
 }
 

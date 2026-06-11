@@ -66,6 +66,12 @@ void multirexz80_sdl12_keymap_defaults(multirexz80_sdl12_keymap_t *map)
     map->right = SDLK_RIGHT;
     map->button1 = SDLK_LALT;
     map->button2 = SDLK_LCTRL;
+    map->rotate_left = SDLK_q;
+    map->rotate_right = SDLK_e;
+    map->aim_up = SDLK_w;
+    map->aim_down = SDLK_s;
+    map->aim_left = SDLK_a;
+    map->aim_right = SDLK_d;
     map->start = SDLK_RETURN;
     map->select = SDLK_ESCAPE;
     map->arcade_coin1 = SDLK_5;
@@ -196,6 +202,12 @@ static void set_pad_key(SDLKey key, int32_t pressed, const multirexz80_sdl12_key
     else if (key == map->right) set_mask8(&input.pad[0], INPUT_RIGHT, pressed);
     else if (key == map->button1) set_mask8(&input.pad[0], INPUT_BUTTON1, pressed);
     else if (key == map->button2) set_mask8(&input.pad[0], INPUT_BUTTON2, pressed);
+    else if (key == map->rotate_left) set_mask8(&input.pad[0], INPUT_ROTATE_LEFT, pressed);
+    else if (key == map->rotate_right) set_mask8(&input.pad[0], INPUT_ROTATE_RIGHT, pressed);
+    else if (key == map->aim_up) set_mask8(&input.rotary_aim[0], INPUT_AIM_UP, pressed);
+    else if (key == map->aim_down) set_mask8(&input.rotary_aim[0], INPUT_AIM_DOWN, pressed);
+    else if (key == map->aim_left) set_mask8(&input.rotary_aim[0], INPUT_AIM_LEFT, pressed);
+    else if (key == map->aim_right) set_mask8(&input.rotary_aim[0], INPUT_AIM_RIGHT, pressed);
     else if (key == map->start && !multirexz80_sdl12_arcade_active())
     {
         uint8_t mask = (sms.console == CONSOLE_GG) ? INPUT_START : INPUT_PAUSE;

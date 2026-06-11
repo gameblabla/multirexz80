@@ -429,6 +429,61 @@ static int zip_find_entry_in_memory(const uint8_t *archive, size_t archive_size,
     return 0;
 }
 
+
+static int zip_find_entry_by_size_crc_in_memory(const uint8_t *archive, size_t archive_size,
+                                                uint32_t expected_size, uint32_t expected_crc,
+                                                zip_entry_ref_t *out_entry)
+{
+    size_t eocd;
+    size_t cd_offset_sz;
+    size_t cd_size_sz;
+    uint16_t disk_no;
+    uint16_t cd_disk;
+    uint16_t entries_this_disk;
+    uint16_t entries_total;
+    uint32_t cd_size;
+    uint32_t cd_offset;
+    size_t cd_pos;
+    size_t cd_end;
+    uint16_t i;
+
+    if (!archive || !out_entry || !expected_size || !expected_crc)
+        return 0;
+    if (!zip_find_eocd(archive, archive_size, &eocd))
+        return 0;
+
+    disk_no = zip_rd16(archive + eocd + 4);
+    cd_disk = zip_rd16(archive + eocd + 6);
+    entries_this_disk = zip_rd16(archive + eocd + 8);
+    entries_total = zip_rd16(archive + eocd + 10);
+    cd_size = zip_rd32(archive + eocd + 12);
+    cd_offset = zip_rd32(archive + eocd + 16);
+
+    if (disk_no || cd_disk || entries_this_disk != entries_total)
+        return 0;
+    cd_offset_sz = (size_t)cd_offset;
+    cd_size_sz = (size_t)cd_size;
+    if (cd_offset_sz > archive_size || cd_size_sz > archive_size - cd_offset_sz)
+        return 0;
+
+    cd_pos = cd_offset_sz;
+    cd_end = cd_offset_sz + cd_size_sz;
+    for (i = 0; i < entries_total && cd_pos < cd_end; i++)
+    {
+        zip_entry_ref_t entry;
+        size_t next_pos;
+        if (!zip_parse_central_entry(archive, archive_size, cd_pos, &entry, &next_pos))
+            return 0;
+        if (entry.uncompressed_size == expected_size && entry.crc == expected_crc)
+        {
+            *out_entry = entry;
+            return 1;
+        }
+        cd_pos = next_pos;
+    }
+    return 0;
+}
+
 static int zip_extract_entry(const zip_entry_ref_t *entry, uint8_t *dst,
                              uint32_t expected_size, uint32_t expected_crc)
 {
@@ -518,6 +573,8 @@ int32_t loadZipMemberExact(const char *archive_path, const char *name,
     if (!zip_read_whole_file(archive_path, &archive, &archive_size))
         return 0;
     if (zip_find_entry_in_memory(archive, archive_size, name, 0, &entry))
+        ok = zip_extract_entry(&entry, dst, expected_size, expected_crc);
+    if (!ok && expected_crc && zip_find_entry_by_size_crc_in_memory(archive, archive_size, expected_size, expected_crc, &entry))
         ok = zip_extract_entry(&entry, dst, expected_size, expected_crc);
     free(archive);
     return ok;

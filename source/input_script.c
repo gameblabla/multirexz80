@@ -42,12 +42,24 @@ typedef enum input_action_id
     IA_RIGHT,
     IA_A,
     IA_B,
+    IA_ROTATE_LEFT,
+    IA_ROTATE_RIGHT,
+    IA_AIM_UP,
+    IA_AIM_DOWN,
+    IA_AIM_LEFT,
+    IA_AIM_RIGHT,
     IA_P2_UP,
     IA_P2_DOWN,
     IA_P2_LEFT,
     IA_P2_RIGHT,
     IA_P2_A,
     IA_P2_B,
+    IA_P2_ROTATE_LEFT,
+    IA_P2_ROTATE_RIGHT,
+    IA_P2_AIM_UP,
+    IA_P2_AIM_DOWN,
+    IA_P2_AIM_LEFT,
+    IA_P2_AIM_RIGHT,
     IA_P,
     IA_START,
     IA_PAUSE,
@@ -114,12 +126,24 @@ static const action_name_t action_names[] = {
     {"RIGHT", IA_RIGHT}, {"R", IA_RIGHT},
     {"A", IA_A}, {"BUTTON1", IA_A}, {"B1", IA_A}, {"1", IA_A},
     {"B", IA_B}, {"BUTTON2", IA_B}, {"B2", IA_B}, {"2", IA_B},
+    {"ROTLEFT", IA_ROTATE_LEFT}, {"ROTATE_LEFT", IA_ROTATE_LEFT}, {"LS30_CCW", IA_ROTATE_LEFT},
+    {"ROTRIGHT", IA_ROTATE_RIGHT}, {"ROTATE_RIGHT", IA_ROTATE_RIGHT}, {"LS30_CW", IA_ROTATE_RIGHT},
+    {"AIM_UP", IA_AIM_UP}, {"LS30_UP", IA_AIM_UP},
+    {"AIM_DOWN", IA_AIM_DOWN}, {"LS30_DOWN", IA_AIM_DOWN},
+    {"AIM_LEFT", IA_AIM_LEFT}, {"LS30_LEFT", IA_AIM_LEFT},
+    {"AIM_RIGHT", IA_AIM_RIGHT}, {"LS30_RIGHT", IA_AIM_RIGHT},
     {"P2_UP", IA_P2_UP}, {"2P_UP", IA_P2_UP},
     {"P2_DOWN", IA_P2_DOWN}, {"2P_DOWN", IA_P2_DOWN},
     {"P2_LEFT", IA_P2_LEFT}, {"2P_LEFT", IA_P2_LEFT},
     {"P2_RIGHT", IA_P2_RIGHT}, {"2P_RIGHT", IA_P2_RIGHT},
     {"P2_A", IA_P2_A}, {"P2_BUTTON1", IA_P2_A},
     {"P2_B", IA_P2_B}, {"P2_BUTTON2", IA_P2_B},
+    {"P2_ROTLEFT", IA_P2_ROTATE_LEFT}, {"P2_ROTATE_LEFT", IA_P2_ROTATE_LEFT}, {"P2_LS30_CCW", IA_P2_ROTATE_LEFT},
+    {"P2_ROTRIGHT", IA_P2_ROTATE_RIGHT}, {"P2_ROTATE_RIGHT", IA_P2_ROTATE_RIGHT}, {"P2_LS30_CW", IA_P2_ROTATE_RIGHT},
+    {"P2_AIM_UP", IA_P2_AIM_UP}, {"P2_LS30_UP", IA_P2_AIM_UP},
+    {"P2_AIM_DOWN", IA_P2_AIM_DOWN}, {"P2_LS30_DOWN", IA_P2_AIM_DOWN},
+    {"P2_AIM_LEFT", IA_P2_AIM_LEFT}, {"P2_LS30_LEFT", IA_P2_AIM_LEFT},
+    {"P2_AIM_RIGHT", IA_P2_AIM_RIGHT}, {"P2_LS30_RIGHT", IA_P2_AIM_RIGHT},
     {"P", IA_P}, {"PAUSE_START", IA_P},
     {"START", IA_START},
     {"PAUSE", IA_PAUSE},
@@ -244,12 +268,24 @@ static void apply_action(input_t *dst, uint8_t action, int pressed)
         case IA_RIGHT:    set_bit(&dst->pad[0], INPUT_RIGHT, pressed); break;
         case IA_A:        set_bit(&dst->pad[0], INPUT_BUTTON1, pressed); break;
         case IA_B:        set_bit(&dst->pad[0], INPUT_BUTTON2, pressed); break;
+        case IA_ROTATE_LEFT:  set_bit(&dst->pad[0], INPUT_ROTATE_LEFT, pressed); break;
+        case IA_ROTATE_RIGHT: set_bit(&dst->pad[0], INPUT_ROTATE_RIGHT, pressed); break;
+        case IA_AIM_UP:       set_bit(&dst->rotary_aim[0], INPUT_AIM_UP, pressed); break;
+        case IA_AIM_DOWN:     set_bit(&dst->rotary_aim[0], INPUT_AIM_DOWN, pressed); break;
+        case IA_AIM_LEFT:     set_bit(&dst->rotary_aim[0], INPUT_AIM_LEFT, pressed); break;
+        case IA_AIM_RIGHT:    set_bit(&dst->rotary_aim[0], INPUT_AIM_RIGHT, pressed); break;
         case IA_P2_UP:    set_bit(&dst->pad[1], INPUT_UP, pressed); break;
         case IA_P2_DOWN:  set_bit(&dst->pad[1], INPUT_DOWN, pressed); break;
         case IA_P2_LEFT:  set_bit(&dst->pad[1], INPUT_LEFT, pressed); break;
         case IA_P2_RIGHT: set_bit(&dst->pad[1], INPUT_RIGHT, pressed); break;
         case IA_P2_A:     set_bit(&dst->pad[1], INPUT_BUTTON1, pressed); break;
         case IA_P2_B:     set_bit(&dst->pad[1], INPUT_BUTTON2, pressed); break;
+        case IA_P2_ROTATE_LEFT:  set_bit(&dst->pad[1], INPUT_ROTATE_LEFT, pressed); break;
+        case IA_P2_ROTATE_RIGHT: set_bit(&dst->pad[1], INPUT_ROTATE_RIGHT, pressed); break;
+        case IA_P2_AIM_UP:       set_bit(&dst->rotary_aim[1], INPUT_AIM_UP, pressed); break;
+        case IA_P2_AIM_DOWN:     set_bit(&dst->rotary_aim[1], INPUT_AIM_DOWN, pressed); break;
+        case IA_P2_AIM_LEFT:     set_bit(&dst->rotary_aim[1], INPUT_AIM_LEFT, pressed); break;
+        case IA_P2_AIM_RIGHT:    set_bit(&dst->rotary_aim[1], INPUT_AIM_RIGHT, pressed); break;
         case IA_P:
             set_bit(&dst->system, IS_GG ? INPUT_START : INPUT_PAUSE, pressed);
             break;
@@ -548,12 +584,24 @@ static const char *action_output_name(input_action_id_t action)
         case IA_RIGHT: return "RIGHT";
         case IA_A: return "A";
         case IA_B: return "B";
+        case IA_ROTATE_LEFT: return "ROTATE_LEFT";
+        case IA_ROTATE_RIGHT: return "ROTATE_RIGHT";
+        case IA_AIM_UP: return "AIM_UP";
+        case IA_AIM_DOWN: return "AIM_DOWN";
+        case IA_AIM_LEFT: return "AIM_LEFT";
+        case IA_AIM_RIGHT: return "AIM_RIGHT";
         case IA_P2_UP: return "P2_UP";
         case IA_P2_DOWN: return "P2_DOWN";
         case IA_P2_LEFT: return "P2_LEFT";
         case IA_P2_RIGHT: return "P2_RIGHT";
         case IA_P2_A: return "P2_A";
         case IA_P2_B: return "P2_B";
+        case IA_P2_ROTATE_LEFT: return "P2_ROTATE_LEFT";
+        case IA_P2_ROTATE_RIGHT: return "P2_ROTATE_RIGHT";
+        case IA_P2_AIM_UP: return "P2_AIM_UP";
+        case IA_P2_AIM_DOWN: return "P2_AIM_DOWN";
+        case IA_P2_AIM_LEFT: return "P2_AIM_LEFT";
+        case IA_P2_AIM_RIGHT: return "P2_AIM_RIGHT";
         case IA_P: return "P";
         case IA_START: return "START";
         case IA_PAUSE: return "PAUSE";
@@ -647,12 +695,24 @@ void multirexz80_input_recorder_write_state_changes(multirexz80_input_recorder_t
     write_if_changed(recorder, frame, old->pad[0], state->pad[0], INPUT_RIGHT, IA_RIGHT);
     write_if_changed(recorder, frame, old->pad[0], state->pad[0], INPUT_BUTTON1, IA_A);
     write_if_changed(recorder, frame, old->pad[0], state->pad[0], INPUT_BUTTON2, IA_B);
+    write_if_changed(recorder, frame, old->pad[0], state->pad[0], INPUT_ROTATE_LEFT, IA_ROTATE_LEFT);
+    write_if_changed(recorder, frame, old->pad[0], state->pad[0], INPUT_ROTATE_RIGHT, IA_ROTATE_RIGHT);
+    write_if_changed(recorder, frame, old->rotary_aim[0], state->rotary_aim[0], INPUT_AIM_UP, IA_AIM_UP);
+    write_if_changed(recorder, frame, old->rotary_aim[0], state->rotary_aim[0], INPUT_AIM_DOWN, IA_AIM_DOWN);
+    write_if_changed(recorder, frame, old->rotary_aim[0], state->rotary_aim[0], INPUT_AIM_LEFT, IA_AIM_LEFT);
+    write_if_changed(recorder, frame, old->rotary_aim[0], state->rotary_aim[0], INPUT_AIM_RIGHT, IA_AIM_RIGHT);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_UP, IA_P2_UP);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_DOWN, IA_P2_DOWN);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_LEFT, IA_P2_LEFT);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_RIGHT, IA_P2_RIGHT);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_BUTTON1, IA_P2_A);
     write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_BUTTON2, IA_P2_B);
+    write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_ROTATE_LEFT, IA_P2_ROTATE_LEFT);
+    write_if_changed(recorder, frame, old->pad[1], state->pad[1], INPUT_ROTATE_RIGHT, IA_P2_ROTATE_RIGHT);
+    write_if_changed(recorder, frame, old->rotary_aim[1], state->rotary_aim[1], INPUT_AIM_UP, IA_P2_AIM_UP);
+    write_if_changed(recorder, frame, old->rotary_aim[1], state->rotary_aim[1], INPUT_AIM_DOWN, IA_P2_AIM_DOWN);
+    write_if_changed(recorder, frame, old->rotary_aim[1], state->rotary_aim[1], INPUT_AIM_LEFT, IA_P2_AIM_LEFT);
+    write_if_changed(recorder, frame, old->rotary_aim[1], state->rotary_aim[1], INPUT_AIM_RIGHT, IA_P2_AIM_RIGHT);
     write_if_changed(recorder, frame, old->system, state->system, INPUT_START, IA_START);
     write_if_changed(recorder, frame, old->system, state->system, INPUT_PAUSE, IA_PAUSE);
     write_if_changed(recorder, frame, old->system, state->system, INPUT_RESET, IA_RESET);

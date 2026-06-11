@@ -113,6 +113,8 @@ typedef enum action_id {
     ACT_P2_UP, ACT_P2_DOWN, ACT_P2_LEFT, ACT_P2_RIGHT, ACT_P2_BUTTON1, ACT_P2_BUTTON2,
     ACT_P2_KP0, ACT_P2_KP1, ACT_P2_KP2, ACT_P2_KP3, ACT_P2_KP4, ACT_P2_KP5,
     ACT_P2_KP6, ACT_P2_KP7, ACT_P2_KP8, ACT_P2_KP9, ACT_P2_KP_STAR, ACT_P2_KP_HASH,
+    ACT_ROTATE_LEFT, ACT_ROTATE_RIGHT, ACT_AIM_UP, ACT_AIM_DOWN, ACT_AIM_LEFT, ACT_AIM_RIGHT,
+    ACT_P2_ROTATE_LEFT, ACT_P2_ROTATE_RIGHT, ACT_P2_AIM_UP, ACT_P2_AIM_DOWN, ACT_P2_AIM_LEFT, ACT_P2_AIM_RIGHT,
     ACT_COUNT
 } action_id_t;
 #define ACT_BIT(n)              (1ull << (unsigned)(n))
@@ -454,7 +456,19 @@ static void default_controls(app_state_t *a) {
         {"Controller 2 Keypad 8", 0, -1},
         {"Controller 2 Keypad 9", 0, -1},
         {"Controller 2 Keypad *", 0, -1},
-        {"Controller 2 Keypad #", 0, -1}
+        {"Controller 2 Keypad #", 0, -1},
+        {"Controller 1 Rotate Left", 'Q', 4},
+        {"Controller 1 Rotate Right", 'E', 5},
+        {"Controller 1 Aim Up", 'W', JOY_BIND_DIR_UP},
+        {"Controller 1 Aim Down", 'S', JOY_BIND_DIR_DOWN},
+        {"Controller 1 Aim Left", 'A', JOY_BIND_DIR_LEFT},
+        {"Controller 1 Aim Right", 'D', JOY_BIND_DIR_RIGHT},
+        {"Controller 2 Rotate Left", 'U', -1},
+        {"Controller 2 Rotate Right", 'O', -1},
+        {"Controller 2 Aim Up", 0, -1},
+        {"Controller 2 Aim Down", 0, -1},
+        {"Controller 2 Aim Left", 0, -1},
+        {"Controller 2 Aim Right", 0, -1}
     };
     for (int i = 0; i < ACT_COUNT; ++i) a->controls[i] = c[i];
 }
@@ -1072,12 +1086,16 @@ static int action_pad_port(action_id_t act, uint8_t *out_bit) {
     case ACT_RIGHT: bit = INPUT_RIGHT; port = 0; break;
     case ACT_BUTTON1: bit = INPUT_BUTTON1; port = 0; break;
     case ACT_BUTTON2: bit = INPUT_BUTTON2; port = 0; break;
+    case ACT_ROTATE_LEFT: bit = INPUT_ROTATE_LEFT; port = 0; break;
+    case ACT_ROTATE_RIGHT: bit = INPUT_ROTATE_RIGHT; port = 0; break;
     case ACT_P2_UP: bit = INPUT_UP; port = 1; break;
     case ACT_P2_DOWN: bit = INPUT_DOWN; port = 1; break;
     case ACT_P2_LEFT: bit = INPUT_LEFT; port = 1; break;
     case ACT_P2_RIGHT: bit = INPUT_RIGHT; port = 1; break;
     case ACT_P2_BUTTON1: bit = INPUT_BUTTON1; port = 1; break;
     case ACT_P2_BUTTON2: bit = INPUT_BUTTON2; port = 1; break;
+    case ACT_P2_ROTATE_LEFT: bit = INPUT_ROTATE_LEFT; port = 1; break;
+    case ACT_P2_ROTATE_RIGHT: bit = INPUT_ROTATE_RIGHT; port = 1; break;
     default: break;
     }
     if (out_bit) *out_bit = bit;
@@ -1090,6 +1108,18 @@ static void set_action_state(app_state_t *a, action_id_t act, int down) {
     (void)a;
     port = action_pad_port(act, &bit);
     if (port >= 0) set_pad_bit(port, bit, down);
+
+    switch (act) {
+    case ACT_AIM_UP: if (down) input.rotary_aim[0] |= INPUT_AIM_UP; else input.rotary_aim[0] &= (uint8_t)~INPUT_AIM_UP; break;
+    case ACT_AIM_DOWN: if (down) input.rotary_aim[0] |= INPUT_AIM_DOWN; else input.rotary_aim[0] &= (uint8_t)~INPUT_AIM_DOWN; break;
+    case ACT_AIM_LEFT: if (down) input.rotary_aim[0] |= INPUT_AIM_LEFT; else input.rotary_aim[0] &= (uint8_t)~INPUT_AIM_LEFT; break;
+    case ACT_AIM_RIGHT: if (down) input.rotary_aim[0] |= INPUT_AIM_RIGHT; else input.rotary_aim[0] &= (uint8_t)~INPUT_AIM_RIGHT; break;
+    case ACT_P2_AIM_UP: if (down) input.rotary_aim[1] |= INPUT_AIM_UP; else input.rotary_aim[1] &= (uint8_t)~INPUT_AIM_UP; break;
+    case ACT_P2_AIM_DOWN: if (down) input.rotary_aim[1] |= INPUT_AIM_DOWN; else input.rotary_aim[1] &= (uint8_t)~INPUT_AIM_DOWN; break;
+    case ACT_P2_AIM_LEFT: if (down) input.rotary_aim[1] |= INPUT_AIM_LEFT; else input.rotary_aim[1] &= (uint8_t)~INPUT_AIM_LEFT; break;
+    case ACT_P2_AIM_RIGHT: if (down) input.rotary_aim[1] |= INPUT_AIM_RIGHT; else input.rotary_aim[1] &= (uint8_t)~INPUT_AIM_RIGHT; break;
+    default: break;
+    }
 
     if (act == ACT_PAUSE_BUTTON) {
         uint8_t sys = IS_GG ? INPUT_START : INPUT_PAUSE;
@@ -1315,12 +1345,14 @@ typedef struct control_setup_state {
 
 static const action_id_t k_ctrl1_sequence[] = {
     ACT_UP, ACT_DOWN, ACT_LEFT, ACT_RIGHT, ACT_BUTTON1, ACT_BUTTON2,
+    ACT_AIM_UP, ACT_AIM_RIGHT, ACT_AIM_DOWN, ACT_AIM_LEFT, ACT_ROTATE_LEFT, ACT_ROTATE_RIGHT,
     ACT_PAUSE_BUTTON, ACT_COIN1, ACT_START1, ACT_M5_1, ACT_M5_2,
     ACT_KP0, ACT_KP1, ACT_KP2, ACT_KP3, ACT_KP4, ACT_KP5, ACT_KP6,
     ACT_KP7, ACT_KP8, ACT_KP9, ACT_KP_STAR, ACT_KP_HASH
 };
 static const action_id_t k_ctrl2_sequence[] = {
     ACT_P2_UP, ACT_P2_DOWN, ACT_P2_LEFT, ACT_P2_RIGHT, ACT_P2_BUTTON1, ACT_P2_BUTTON2,
+    ACT_P2_AIM_UP, ACT_P2_AIM_RIGHT, ACT_P2_AIM_DOWN, ACT_P2_AIM_LEFT, ACT_P2_ROTATE_LEFT, ACT_P2_ROTATE_RIGHT,
     ACT_COIN2, ACT_START2,
     ACT_P2_KP0, ACT_P2_KP1, ACT_P2_KP2, ACT_P2_KP3, ACT_P2_KP4, ACT_P2_KP5,
     ACT_P2_KP6, ACT_P2_KP7, ACT_P2_KP8, ACT_P2_KP9, ACT_P2_KP_STAR, ACT_P2_KP_HASH

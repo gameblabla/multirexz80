@@ -50,6 +50,15 @@
 #define INPUT_RIGHT         0x00000008
 #define INPUT_BUTTON1       0x00000010
 #define INPUT_BUTTON2       0x00000020
+#define INPUT_ROTATE_LEFT    0x00000040  /* SNK LS-30 rotary: rotate aim/cursor counter-clockwise */
+#define INPUT_ROTATE_RIGHT   0x00000080  /* SNK LS-30 rotary: rotate aim/cursor clockwise */
+
+/* These are held in input.rotary_aim[] rather than input.pad[] because the
+ * LS-30 rotary joystick is independent from the 8-way movement stick. */
+#define INPUT_AIM_UP          0x01
+#define INPUT_AIM_DOWN        0x02
+#define INPUT_AIM_LEFT        0x04
+#define INPUT_AIM_RIGHT       0x08
 
 /* These can be used for 'input.system' */
 #define INPUT_START         0x00000001  /* Game Gear only */
@@ -78,6 +87,11 @@ typedef struct
 {
 	int32_t analog[2][2];
 	uint8_t pad[2];
+	/* SNK LS-30 rotary input. rotary_pos is a 12-position absolute dial
+	 * (0 = up, then clockwise), and rotary_aim is a transient 4-way/8-way
+	 * absolute aim bitfield used by keyboard/gamepad frontends. */
+	uint8_t rotary_pos[2];
+	uint8_t rotary_aim[2];
 	uint8_t system;
 	uint8_t arcade;
 	/* Sord M5 keyboard matrix, active-high rows Y0-Y6, matching MAME's m5.cpp input ports. */

@@ -163,6 +163,9 @@ typedef struct
 
     uint8_t dsw1;
     uint8_t dsw2;
+    uint8_t rotary_repeat[2];
+    uint8_t rotary_last_pos[2];
+    uint8_t rotary_gwar_cp_count[2];
 
     uint8_t game_type;
     uint8_t rotate;
@@ -331,6 +334,16 @@ void snk_psychos_set_game_variant(int variant)
     snk.pal_sp32_base = SNK_PAL_SP32_BASE;
     snk.dsw1 = 0x3b;
     snk.dsw2 = 0xbf;
+    input.rotary_pos[0] = 0;
+    input.rotary_pos[1] = 0;
+    input.rotary_aim[0] = 0;
+    input.rotary_aim[1] = 0;
+    snk.rotary_repeat[0] = 0;
+    snk.rotary_repeat[1] = 0;
+    snk.rotary_last_pos[0] = 0;
+    snk.rotary_last_pos[1] = 0;
+    snk.rotary_gwar_cp_count[0] = 0;
+    snk.rotary_gwar_cp_count[1] = 0;
 
     switch (variant)
     {
@@ -1249,19 +1262,111 @@ static uint8_t snk_athena_player_port(int player)
 
 
 
+static uint8_t snk_ls30_pos_from_aim(uint8_t aim)
+{
+    int up = (aim & INPUT_AIM_UP) != 0;
+    int down = (aim & INPUT_AIM_DOWN) != 0;
+    int left = (aim & INPUT_AIM_LEFT) != 0;
+    int right = (aim & INPUT_AIM_RIGHT) != 0;
+
+    if (up && down) up = down = 0;
+    if (left && right) left = right = 0;
+
+    /* MAME models the original SNK LS-30 as a 12-position rotary control in
+     * the high nibble, not as the bootleg joystick-hack bit pattern.  Keep an
+     * internal 12-step compass with 0 = up and cardinal points every 3 steps. */
+    if (up && right) return 1;
+    if (right && down) return 4;
+    if (down && left) return 7;
+    if (left && up) return 10;
+    if (up) return 0;
+    if (right) return 3;
+    if (down) return 6;
+    if (left) return 9;
+    return 0xff;
+}
+
+static void snk_ls30_step_player(int player, int dir)
+{
+    player &= 1;
+    input.rotary_pos[player] = (uint8_t)((input.rotary_pos[player] + (dir > 0 ? 1 : 11)) % 12);
+}
+
+static void snk_update_ls30_player(int player)
+{
+    uint8_t aim, pos, step_mask;
+    player &= 1;
+
+    aim = (uint8_t)(input.rotary_aim[player] & (INPUT_AIM_UP | INPUT_AIM_DOWN | INPUT_AIM_LEFT | INPUT_AIM_RIGHT));
+    pos = snk_ls30_pos_from_aim(aim);
+    if (pos != 0xff)
+    {
+        input.rotary_pos[player] = pos;
+        snk.rotary_repeat[player] = 0;
+        return;
+    }
+
+    step_mask = (uint8_t)(input.pad[player] & (INPUT_ROTATE_LEFT | INPUT_ROTATE_RIGHT));
+    if ((step_mask & INPUT_ROTATE_LEFT) && !(step_mask & INPUT_ROTATE_RIGHT))
+    {
+        if (snk.rotary_repeat[player] == 0) snk_ls30_step_player(player, -1);
+        snk.rotary_repeat[player] = (uint8_t)((snk.rotary_repeat[player] + 1) & 3);
+    }
+    else if ((step_mask & INPUT_ROTATE_RIGHT) && !(step_mask & INPUT_ROTATE_LEFT))
+    {
+        if (snk.rotary_repeat[player] == 0) snk_ls30_step_player(player, 1);
+        snk.rotary_repeat[player] = (uint8_t)((snk.rotary_repeat[player] + 1) & 3);
+    }
+    else
+    {
+        snk.rotary_repeat[player] = 0;
+    }
+}
+
+static void snk_update_ls30_inputs(void)
+{
+    if (snk.game_type == SNK_GAME_IKARI || snk.game_type == SNK_GAME_VICTROAD || snk.game_type == SNK_GAME_GWAR)
+    {
+        snk_update_ls30_player(0);
+        snk_update_ls30_player(1);
+    }
+}
+
+static uint8_t snk_ls30_read_pos(int player)
+{
+    uint8_t pos;
+    player &= 1;
+    pos = (uint8_t)(input.rotary_pos[player] % 12);
+
+    /* MAME's GWAR protection notes that the original mechanical 12-way rotary
+     * can momentarily report 0xf when crossing between positions 5 and 6.  Do
+     * the same occasionally so this is still a hardware-style model rather than
+     * a perfect TTL counter. */
+    if (snk.game_type == SNK_GAME_GWAR &&
+        ((snk.rotary_last_pos[player] == 5 && pos == 6) || (snk.rotary_last_pos[player] == 6 && pos == 5)))
+    {
+        uint8_t ret = pos;
+        if (snk.rotary_gwar_cp_count[player] == 0) ret = 0x0f;
+        snk.rotary_gwar_cp_count[player] = (uint8_t)((snk.rotary_gwar_cp_count[player] + 1) & 7);
+        snk.rotary_last_pos[player] = pos;
+        return ret;
+    }
+    snk.rotary_last_pos[player] = pos;
+    return pos;
+}
+
 static uint8_t snk_ikari_player_port(int player)
 {
     uint8_t r = 0x0f;
     uint8_t p = input.pad[player & 1];
-    /* MAME models the high nibble as the 12-position LS30 rotary joystick
-     * decode.  This compact port leaves the rotary ring at its neutral/default
-     * code for attract-mode stability and maps the eight-way stick to the low
-     * nibble used by boot checks and joystick-hack sets. */
+    player &= 1;
+
     if (p & INPUT_UP)    r &= (uint8_t)~0x01;
     if (p & INPUT_DOWN)  r &= (uint8_t)~0x02;
     if (p & INPUT_LEFT)  r &= (uint8_t)~0x04;
     if (p & INPUT_RIGHT) r &= (uint8_t)~0x08;
-    return r;
+
+    return (uint8_t)(r | (uint8_t)(snk_ls30_read_pos(player) << 4));
 }
 
 static int snk_hardflags_check(int num)
@@ -1349,7 +1454,7 @@ uint8_t snk_psychos_readmem(uint16_t address)
             if (address == 0xcee0)
                 return snk_hardflags7_r();
         }
-        if (snk.game_type == SNK_GAME_IKARI)
+        if (snk.game_type == SNK_GAME_IKARI || snk.game_type == SNK_GAME_VICTROAD || snk.game_type == SNK_GAME_GWAR)
         {
             switch (address)
             {
@@ -2393,6 +2498,8 @@ void snk_psychos_frame(uint32_t skip_render)
 
     if (input.system & INPUT_RESET)
         snk_psychos_reset();
+
+    snk_update_ls30_inputs();
 
     sms.paused = 0;
     vdp.height = (snk.rotate == SNK_ROT_NONE) ? snk.crop_h : snk.crop_w;

@@ -30,6 +30,12 @@ typedef struct multirexz80_sdl12_keymap_t
     SDLKey right;
     SDLKey button1;     /* core INPUT_BUTTON1 */
     SDLKey button2;     /* core INPUT_BUTTON2 */
+    SDLKey rotate_left; /* SNK LS-30 optional rotate */
+    SDLKey rotate_right;
+    SDLKey aim_up;     /* SNK LS-30 absolute aim, independent from movement */
+    SDLKey aim_down;
+    SDLKey aim_left;
+    SDLKey aim_right;
     SDLKey start;
     SDLKey select;
     SDLKey arcade_coin1;

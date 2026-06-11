@@ -292,6 +292,15 @@ COLECO_MULTI_SPRITES_FRAMES ?= 120
 test-coleco-multi-sprites: $(PRGNAME)
 	python3 source/tests/coleco_multi_sprites_regression.py --binary ./$(PRGNAME) --rom "$(COLECO_MULTI_SPRITES_ROM)" --bios "$(COLECO_MULTI_SPRITES_BIOS)" --out-dir $(COLECO_MULTI_SPRITES_OUT_DIR) --frames $(COLECO_MULTI_SPRITES_FRAMES)
 
+
+SNK_ROMSET_CHOPPER_ROM ?= roms/chopper.zip
+SNK_ROMSET_VICTROAD_ROM ?= roms/victroad.zip
+SNK_ROMSET_PSYCHOS_ROM ?= roms/psychos.zip
+SNK_ROMSET_OUT_DIR ?= test-results/snk_romset_controls
+
+test-snk-romset-controls: $(PRGNAME)
+	python3 source/tests/snk_romset_controls_regression.py --binary ./$(PRGNAME) --chopper-rom "$(SNK_ROMSET_CHOPPER_ROM)" --victroad-rom "$(SNK_ROMSET_VICTROAD_ROM)" $(if $(SNK_ROMSET_PSYCHOS_ROM),--psychos-rom "$(SNK_ROMSET_PSYCHOS_ROM)",) --out-dir $(SNK_ROMSET_OUT_DIR) --quiet
+
 ROM_BUNDLE_SMOKE_ROM_DIR ?= roms
 ROM_BUNDLE_SMOKE_OUT_DIR ?= test-results/rom_bundle_smoke
 ROM_BUNDLE_SMOKE_FRAMES ?= 3600

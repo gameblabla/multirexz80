@@ -116,6 +116,10 @@ GAMES: dict[str, dict[str, object]] = {
         "pcm_sha256": "49722a787982c00a7a639fc1e9b4f87707bbdc6c83cb60c8b3d93001b6283035",
     },
     "drift2": {
+        # The user's ROM bundle contains drift2.zip as a zipped Game Gear ROM,
+        # not a Sega System E arcade set.  Do not force it through the System E
+        # path: that produced a deterministic black frame and allowed a false
+        # rendering pass.  Auto/gg loads both drif2.gg and the zipped .gg member.
         "roms": ["drif2.gg", "drift2.zip", "Sonic Drift 2 (World).gg", "sonic_drift2.gg"],
         "console": "auto",
         "frames": 3600,

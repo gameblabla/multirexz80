@@ -608,6 +608,7 @@ typedef struct
     uint32_t flags;
 } system1_zip_file_t;
 
+
 typedef struct
 {
     const char *set_name;
@@ -1620,7 +1621,38 @@ static const system1_zip_file_t snk_psychos_files[] = {
     {NULL, 0, 0, 0, 0, 0}
 };
 
-
+static const system1_zip_file_t snk_psychosj_files[] = {
+    {"ps7.4m",     SNK_REGION_MAIN,  0x00000, 0x10000, 0x05dfb409, 0},
+    {"ps6.8m",     SNK_REGION_SUB,   0x00000, 0x10000, 0x5f426ddb, 0},
+    {"ps5.6j",     SNK_REGION_AUDIO, 0x00000, 0x10000, 0xbbd0a8e3, 0},
+    {"psc1.1k",    SNK_REGION_PROM,  0x0000,  0x0400,  0x27b8ca8c, 0},
+    {"psc3.1l",    SNK_REGION_PROM,  0x0400,  0x0400,  0x40e78c9e, 0},
+    {"psc2.2k",    SNK_REGION_PROM,  0x0800,  0x0400,  0xd845d5ac, 0},
+    {"horizon.8j", SNK_REGION_PROM,  0x0c00,  0x0400,  0xc20b197b, 0},
+    {"vertical.8k",SNK_REGION_PROM,  0x1000,  0x0400,  0x5d0c617f, 0},
+    {"ps8.3a",     SNK_REGION_TX,    0x0000,  0x8000,  0x11a71919, 0},
+    {"ps16.1f",    SNK_REGION_BG,    0x00000, 0x10000, 0x167e5765, 0},
+    {"ps15.1d",    SNK_REGION_BG,    0x10000, 0x10000, 0x8b0fe8d0, 0},
+    {"ps14.1c",    SNK_REGION_BG,    0x20000, 0x10000, 0xf4361c50, 0},
+    {"ps13.1a",    SNK_REGION_BG,    0x30000, 0x10000, 0xe4b0b95e, 0},
+    {"ps12.3g",    SNK_REGION_SP16,  0x00000, 0x8000,  0xf96f82db, 0},
+    {"ps11.3e",    SNK_REGION_SP16,  0x08000, 0x8000,  0x2b007733, 0},
+    {"ps10.3c",    SNK_REGION_SP16,  0x10000, 0x8000,  0xefa830e1, 0},
+    {"ps9.3b",     SNK_REGION_SP16,  0x18000, 0x8000,  0x24559ee1, 0},
+    {"ps17.10f",   SNK_REGION_SP32,  0x00000, 0x10000, 0x2bac250e, 0},
+    {"ps18.10h",   SNK_REGION_SP32,  0x10000, 0x10000, 0x5e1ba353, 0},
+    {"ps19.10j",   SNK_REGION_SP32,  0x20000, 0x10000, 0x9ff91a97, 0},
+    {"ps20.10l",   SNK_REGION_SP32,  0x30000, 0x10000, 0xae1965ef, 0},
+    {"ps21.10m",   SNK_REGION_SP32,  0x40000, 0x10000, 0xdf283b67, 0},
+    {"ps22.10n",   SNK_REGION_SP32,  0x50000, 0x10000, 0x914f051f, 0},
+    {"ps23.10r",   SNK_REGION_SP32,  0x60000, 0x10000, 0xc4488472, 0},
+    {"ps24.10s",   SNK_REGION_SP32,  0x70000, 0x10000, 0x8ec7fe18, 0},
+    {"ps1.5b",     SNK_REGION_YM2,   0x00000, 0x10000, 0x0f8e8276, 0},
+    {"ps2.5c",     SNK_REGION_YM2,   0x10000, 0x10000, 0x34e41dfb, 0},
+    {"ps3.5d",     SNK_REGION_YM2,   0x20000, 0x10000, 0xaa583c5e, 0},
+    {"ps4.5f",     SNK_REGION_YM2,   0x30000, 0x10000, 0x7e8bce7a, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
 
 static const system1_zip_file_t snk_ikari_files[] = {
     {"1.4p",        SNK_REGION_MAIN,  0x00000, 0x10000, 0x52a8b2dd, 0},
@@ -1672,6 +1704,58 @@ static const system1_zip_file_t snk_victroad_files[] = {
     {NULL, 0, 0, 0, 0, 0}
 };
 
+static const system1_zip_file_t snk_dogosoke_files[] = {
+    {"p1.4p",  SNK_REGION_MAIN,  0x00000, 0x10000, 0x37867ad2, 0},
+    {"p2.8p",  SNK_REGION_SUB,   0x00000, 0x10000, 0x907fac83, 0},
+    {"p3.7k",  SNK_REGION_AUDIO, 0x00000, 0x10000, 0x173fa571, 0},
+    {"c1.1k",  SNK_REGION_PROM,  0x0000,  0x0400,  0x10a2ce2b, 0},
+    {"c2.2l",  SNK_REGION_PROM,  0x0400,  0x0400,  0x99dc9792, 0},
+    {"c3.1l",  SNK_REGION_PROM,  0x0800,  0x0400,  0xe7213160, 0},
+    {"p7.3b",  SNK_REGION_TX,    0x0000,  0x4000,  0x51a4ec83, 0},
+    {"p17.4c", SNK_REGION_BG,    0x00000, 0x8000,  0x19d4518c, 0},
+    {"p18.2c", SNK_REGION_BG,    0x08000, 0x8000,  0xd818be43, 0},
+    {"p19.4b", SNK_REGION_BG,    0x10000, 0x8000,  0xd64e0f89, 0},
+    {"p20.2b", SNK_REGION_BG,    0x18000, 0x8000,  0xedba0f31, 0},
+    {"p8.3d",  SNK_REGION_SP16,  0x00000, 0x8000,  0xd43044f8, 0},
+    {"p9.3f",  SNK_REGION_SP16,  0x08000, 0x8000,  0x365ed2d8, 0},
+    {"p10.3h", SNK_REGION_SP16,  0x10000, 0x8000,  0x92579bf3, 0},
+    {"p11.4m", SNK_REGION_SP32,  0x00000, 0x8000,  0x668b25a4, 0},
+    {"p14.2m", SNK_REGION_SP32,  0x08000, 0x8000,  0xa7031d4a, 0},
+    {"p12.4p", SNK_REGION_SP32,  0x10000, 0x8000,  0xf44e95fa, 0},
+    {"p15.2p", SNK_REGION_SP32,  0x18000, 0x8000,  0x120d2450, 0},
+    {"p13.4r", SNK_REGION_SP32,  0x20000, 0x8000,  0x980ca3d8, 0},
+    {"p16.2r", SNK_REGION_SP32,  0x28000, 0x8000,  0x9f820e8a, 0},
+    {"p4.5e",  SNK_REGION_YM2,   0x00000, 0x10000, 0x5b43fe9f, 0},
+    {"p5.5g",  SNK_REGION_YM2,   0x10000, 0x10000, 0xaae30cd6, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
+static const system1_zip_file_t snk_dogosokb_files[] = {
+    {"01.4p",  SNK_REGION_MAIN,  0x00000, 0x10000, 0x53b0ad90, 0},
+    {"p2.8p",  SNK_REGION_SUB,   0x00000, 0x10000, 0x907fac83, 0},
+    {"p3.7k",  SNK_REGION_AUDIO, 0x00000, 0x10000, 0x173fa571, 0},
+    {"c1.1k",  SNK_REGION_PROM,  0x0000,  0x0400,  0x10a2ce2b, 0},
+    {"c2.2l",  SNK_REGION_PROM,  0x0400,  0x0400,  0x99dc9792, 0},
+    {"c3.1l",  SNK_REGION_PROM,  0x0800,  0x0400,  0xe7213160, 0},
+    {"p7.3b",  SNK_REGION_TX,    0x0000,  0x4000,  0x51a4ec83, 0},
+    {"p17.4c", SNK_REGION_BG,    0x00000, 0x8000,  0x19d4518c, 0},
+    {"p18.2c", SNK_REGION_BG,    0x08000, 0x8000,  0xd818be43, 0},
+    {"p19.4b", SNK_REGION_BG,    0x10000, 0x8000,  0xd64e0f89, 0},
+    {"p20.2b", SNK_REGION_BG,    0x18000, 0x8000,  0xedba0f31, 0},
+    {"p8.3d",  SNK_REGION_SP16,  0x00000, 0x8000,  0xd43044f8, 0},
+    {"p9.3f",  SNK_REGION_SP16,  0x08000, 0x8000,  0x365ed2d8, 0},
+    {"p10.3h", SNK_REGION_SP16,  0x10000, 0x8000,  0x92579bf3, 0},
+    {"p11.4m", SNK_REGION_SP32,  0x00000, 0x8000,  0x668b25a4, 0},
+    {"p14.2m", SNK_REGION_SP32,  0x08000, 0x8000,  0xa7031d4a, 0},
+    {"p12.4p", SNK_REGION_SP32,  0x10000, 0x8000,  0xf44e95fa, 0},
+    {"p15.2p", SNK_REGION_SP32,  0x18000, 0x8000,  0x120d2450, 0},
+    {"p13.4r", SNK_REGION_SP32,  0x20000, 0x8000,  0x980ca3d8, 0},
+    {"p16.2r", SNK_REGION_SP32,  0x28000, 0x8000,  0x9f820e8a, 0},
+    {"p4.5e",  SNK_REGION_YM2,   0x00000, 0x10000, 0x5b43fe9f, 0},
+    {"p5.5g",  SNK_REGION_YM2,   0x10000, 0x10000, 0xaae30cd6, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
 static const system1_zip_file_t snk_gwar_files[] = {
     {"1.2g",  SNK_REGION_MAIN,  0x00000, 0x10000, 0x5bcfa7dc, 0},
     {"2.6g",  SNK_REGION_SUB,   0x00000, 0x10000, 0x86d931bf, 0},
@@ -1680,6 +1764,34 @@ static const system1_zip_file_t snk_gwar_files[] = {
     {"2.9v",  SNK_REGION_PROM,  0x0400,  0x0400,  0x9147de69, 0},
     {"1.9u",  SNK_REGION_PROM,  0x0800,  0x0400,  0x7f9c839e, 0},
     {"gw5.8p", SNK_REGION_TX,   0x0000,  0x8000,  0x80f73e2e, 0},
+    {"18.8x", SNK_REGION_BG,    0x00000, 0x10000, 0xf1dcdaef, 0},
+    {"19.8z", SNK_REGION_BG,    0x10000, 0x10000, 0x326e4e5e, 0},
+    {"gw20.8aa",SNK_REGION_BG,  0x20000, 0x10000, 0x0aa70967, 0},
+    {"21.8ac",SNK_REGION_BG,    0x30000, 0x10000, 0xb7686336, 0},
+    {"gw6.2j",SNK_REGION_SP16,  0x00000, 0x10000, 0x58600f7d, 0},
+    {"7.2l",  SNK_REGION_SP16,  0x10000, 0x10000, 0xa3f9b463, 0},
+    {"gw8.2m",SNK_REGION_SP16,  0x20000, 0x10000, 0x092501be, 0},
+    {"gw9.2p",SNK_REGION_SP16,  0x30000, 0x10000, 0x25801ea6, 0},
+    {"16.2ab",SNK_REGION_SP32,  0x00000, 0x10000, 0x2b46edff, 0},
+    {"17.2ad",SNK_REGION_SP32,  0x10000, 0x10000, 0xbe19888d, 0},
+    {"14.2y", SNK_REGION_SP32,  0x20000, 0x10000, 0x2d653f0c, 0},
+    {"15.2aa",SNK_REGION_SP32,  0x30000, 0x10000, 0xebbf3ba2, 0},
+    {"12.2v", SNK_REGION_SP32,  0x40000, 0x10000, 0xaeb3707f, 0},
+    {"13.2w", SNK_REGION_SP32,  0x50000, 0x10000, 0x0808f95f, 0},
+    {"10.2s", SNK_REGION_SP32,  0x60000, 0x10000, 0x8dfc7b87, 0},
+    {"11.2t", SNK_REGION_SP32,  0x70000, 0x10000, 0x06822aac, 0},
+    {"4.2j",  SNK_REGION_YM2,   0x00000, 0x10000, 0x2255f8dd, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
+static const system1_zip_file_t snk_gwarj_files[] = {
+    {"1.2g",  SNK_REGION_MAIN,  0x00000, 0x10000, 0x7f8a880c, 0},
+    {"2.6g",  SNK_REGION_SUB,   0x00000, 0x10000, 0x86d931bf, 0},
+    {"3.7g",  SNK_REGION_AUDIO, 0x00000, 0x10000, 0xeb544ab9, 0},
+    {"3.9w",  SNK_REGION_PROM,  0x0000,  0x0400,  0x090236a3, 0},
+    {"2.9v",  SNK_REGION_PROM,  0x0400,  0x0400,  0x9147de69, 0},
+    {"1.9u",  SNK_REGION_PROM,  0x0800,  0x0400,  0x7f9c839e, 0},
+    {"gw5.8p", SNK_REGION_TX,   0x0000,  0x8000,  0x99d7ddf3, 0},
     {"18.8x", SNK_REGION_BG,    0x00000, 0x10000, 0xf1dcdaef, 0},
     {"19.8z", SNK_REGION_BG,    0x10000, 0x10000, 0x326e4e5e, 0},
     {"gw20.8aa",SNK_REGION_BG,  0x20000, 0x10000, 0x0aa70967, 0},
@@ -1725,6 +1837,92 @@ static const system1_zip_file_t snk_chopper_files[] = {
     {"kk16.3s",        SNK_REGION_SP32,  0x60000, 0x10000, 0xefb1fb6c, 0},
     {"kk17.3t",        SNK_REGION_SP32,  0x70000, 0x10000, 0x6b7fb0a5, 0},
     {"kk2.3j",         SNK_REGION_YM2,   0x00000, 0x10000, 0x06169ae0, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
+static const system1_zip_file_t snk_choppera_files[] = {
+    {"chpri-1.8g", SNK_REGION_MAIN,  0x00000, 0x10000, 0xa4e6e978, 0},
+    {"kk_a_4.6g",  SNK_REGION_SUB,   0x00000, 0x10000, 0x56d10ba3, 0},
+    {"kk3.3d",     SNK_REGION_AUDIO, 0x00000, 0x10000, 0xdbaafb87, 0},
+    {"1.9w",       SNK_REGION_PROM,  0x0000,  0x0400,  0x7f07a45c, 0},
+    {"3.9u",       SNK_REGION_PROM,  0x0400,  0x0400,  0x15359fc3, 0},
+    {"2.9v",       SNK_REGION_PROM,  0x0800,  0x0400,  0x79b50f7d, 0},
+    {"kk5.8p",     SNK_REGION_TX,    0x0000,  0x8000,  0xdefc0987, 0},
+    {"kk10.8y",    SNK_REGION_BG,    0x00000, 0x10000, 0x5cf4d22b, 0},
+    {"kk_a_11.8z", SNK_REGION_BG,    0x10000, 0x10000, 0x881ac259, 0},
+    {"kk_a_12.8ab",SNK_REGION_BG,    0x20000, 0x10000, 0xde96b331, 0},
+    {"kk13.8ac",   SNK_REGION_BG,    0x30000, 0x10000, 0x2756817d, 0},
+    {"kk_a_9.3k",  SNK_REGION_SP16,  0x00000, 0x08000, 0x106c2dcc, 0},
+    {"kk_a_8.3l",  SNK_REGION_SP16,  0x08000, 0x08000, 0xd4f88f62, 0},
+    {"kk_a_7.3n",  SNK_REGION_SP16,  0x10000, 0x08000, 0x28ae39f9, 0},
+    {"kk_a_6.3p",  SNK_REGION_SP16,  0x18000, 0x08000, 0x16774a36, 0},
+    {"kk18.3ab",   SNK_REGION_SP32,  0x00000, 0x10000, 0x6abbff36, 0},
+    {"kk19.2ad",   SNK_REGION_SP32,  0x10000, 0x10000, 0x5283b4d3, 0},
+    {"kk20.3y",    SNK_REGION_SP32,  0x20000, 0x10000, 0x6403ddf2, 0},
+    {"kk21.3aa",   SNK_REGION_SP32,  0x30000, 0x10000, 0x9f411940, 0},
+    {"kk14.3v",    SNK_REGION_SP32,  0x40000, 0x10000, 0x9bad9e25, 0},
+    {"kk15.3x",    SNK_REGION_SP32,  0x50000, 0x10000, 0x89faf590, 0},
+    {"kk16.3s",    SNK_REGION_SP32,  0x60000, 0x10000, 0xefb1fb6c, 0},
+    {"kk17.3t",    SNK_REGION_SP32,  0x70000, 0x10000, 0x6b7fb0a5, 0},
+    {"kk2.3j",     SNK_REGION_YM2,   0x00000, 0x10000, 0x06169ae0, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
+static const system1_zip_file_t snk_chopperb_files[] = {
+    {"kk1.8g",     SNK_REGION_MAIN,  0x00000, 0x10000, 0x8fa2f839, 0},
+    {"kk4.6g",     SNK_REGION_SUB,   0x00000, 0x10000, 0x004f7d9a, 0},
+    {"kk3.3d",     SNK_REGION_AUDIO, 0x00000, 0x10000, 0xdbaafb87, 0},
+    {"1.9w",       SNK_REGION_PROM,  0x0000,  0x0400,  0x7f07a45c, 0},
+    {"3.9u",       SNK_REGION_PROM,  0x0400,  0x0400,  0x15359fc3, 0},
+    {"2.9v",       SNK_REGION_PROM,  0x0800,  0x0400,  0x79b50f7d, 0},
+    {"kk5.8p",     SNK_REGION_TX,    0x0000,  0x8000,  0xdefc0987, 0},
+    {"kk10.8y",    SNK_REGION_BG,    0x00000, 0x10000, 0x5cf4d22b, 0},
+    {"kk11.8z",    SNK_REGION_BG,    0x10000, 0x10000, 0x9af4cad0, 0},
+    {"kk12.8ab",   SNK_REGION_BG,    0x20000, 0x10000, 0x02fec778, 0},
+    {"kk13.8ac",   SNK_REGION_BG,    0x30000, 0x10000, 0x2756817d, 0},
+    {"kk9.3k",     SNK_REGION_SP16,  0x00000, 0x08000, 0x653c4342, 0},
+    {"kk8.3l",     SNK_REGION_SP16,  0x08000, 0x08000, 0x2da45894, 0},
+    {"kk7.3n",     SNK_REGION_SP16,  0x10000, 0x08000, 0xa0ebebdf, 0},
+    {"kk6.3p",     SNK_REGION_SP16,  0x18000, 0x08000, 0x284fad9e, 0},
+    {"kk18.3ab",   SNK_REGION_SP32,  0x00000, 0x10000, 0x6abbff36, 0},
+    {"kk19.2ad",   SNK_REGION_SP32,  0x10000, 0x10000, 0x5283b4d3, 0},
+    {"kk20.3y",    SNK_REGION_SP32,  0x20000, 0x10000, 0x6403ddf2, 0},
+    {"kk21.3aa",   SNK_REGION_SP32,  0x30000, 0x10000, 0x9f411940, 0},
+    {"kk14.3v",    SNK_REGION_SP32,  0x40000, 0x10000, 0x9bad9e25, 0},
+    {"kk15.3x",    SNK_REGION_SP32,  0x50000, 0x10000, 0x89faf590, 0},
+    {"kk16.3s",    SNK_REGION_SP32,  0x60000, 0x10000, 0xefb1fb6c, 0},
+    {"kk17.3t",    SNK_REGION_SP32,  0x70000, 0x10000, 0x6b7fb0a5, 0},
+    {"kk2.3j",     SNK_REGION_YM2,   0x00000, 0x10000, 0x06169ae0, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
+static const system1_zip_file_t snk_legofair_files[] = {
+    {"kk1.4m",      SNK_REGION_MAIN,  0x00000, 0x10000, 0x79a485c0, 0},
+    {"kk4.8m",      SNK_REGION_SUB,   0x00000, 0x10000, 0x96d3a4d9, 0},
+    {"kk3.6j",      SNK_REGION_AUDIO, 0x00000, 0x10000, 0xdbaafb87, 0},
+    {"1.1k",        SNK_REGION_PROM,  0x0000,  0x0400,  0x7f07a45c, 0},
+    {"2.1l",        SNK_REGION_PROM,  0x0400,  0x0400,  0x15359fc3, 0},
+    {"3.2k",        SNK_REGION_PROM,  0x0800,  0x0400,  0x79b50f7d, 0},
+    {"horizon.6h",  SNK_REGION_PROM,  0x0c00,  0x0400,  0xc20b197b, 0},
+    {"vertical.7h", SNK_REGION_PROM,  0x1000,  0x0400,  0x5d0c617f, 0},
+    {"kk5.3a",      SNK_REGION_TX,    0x0000,  0x8000,  0xdefc0987, 0},
+    {"kk10.1a",     SNK_REGION_BG,    0x00000, 0x10000, 0x5cf4d22b, 0},
+    {"kk11.1b",     SNK_REGION_BG,    0x10000, 0x10000, 0x9af4cad0, 0},
+    {"kk12.1d",     SNK_REGION_BG,    0x20000, 0x10000, 0x02fec778, 0},
+    {"kk13.1e",     SNK_REGION_BG,    0x30000, 0x10000, 0x2756817d, 0},
+    {"kk9.3g",      SNK_REGION_SP16,  0x00000, 0x08000, 0x653c4342, 0},
+    {"kk8.3e",      SNK_REGION_SP16,  0x08000, 0x08000, 0x2da45894, 0},
+    {"kk7.3d",      SNK_REGION_SP16,  0x10000, 0x08000, 0xa0ebebdf, 0},
+    {"kk6.3b",      SNK_REGION_SP16,  0x18000, 0x08000, 0x284fad9e, 0},
+    {"kk18.8m",     SNK_REGION_SP32,  0x00000, 0x10000, 0x6abbff36, 0},
+    {"kk19.8n",     SNK_REGION_SP32,  0x10000, 0x10000, 0x5283b4d3, 0},
+    {"kk20.8p",     SNK_REGION_SP32,  0x20000, 0x10000, 0x6403ddf2, 0},
+    {"kk21.8s",     SNK_REGION_SP32,  0x30000, 0x10000, 0x9f411940, 0},
+    {"kk14.7p",     SNK_REGION_SP32,  0x40000, 0x10000, 0x9bad9e25, 0},
+    {"kk15.7s",     SNK_REGION_SP32,  0x50000, 0x10000, 0x89faf590, 0},
+    {"kk16.8j",     SNK_REGION_SP32,  0x60000, 0x10000, 0xefb1fb6c, 0},
+    {"kk17.8k",     SNK_REGION_SP32,  0x70000, 0x10000, 0x6b7fb0a5, 0},
+    {"kk2.5b",      SNK_REGION_YM2,   0x00000, 0x10000, 0x06169ae0, 0},
     {NULL, 0, 0, 0, 0, 0}
 };
 
@@ -1808,6 +2006,32 @@ static const system1_zip_file_t snk_tdfever_files[] = {
     {NULL, 0, 0, 0, 0, 0}
 };
 
+static const system1_zip_file_t snk_tdfeverj_files[] = {
+    {"td2.6c",   SNK_REGION_MAIN,  0x00000, 0x10000, 0x88d88ec4, 0},
+    {"td1.2c",   SNK_REGION_SUB,   0x00000, 0x10000, 0x191e6442, 0},
+    {"td3.3j",   SNK_REGION_AUDIO, 0x00000, 0x10000, 0x4e4d71c7, 0},
+    {"2t.8e",    SNK_REGION_PROM,  0x0000,  0x0400,  0x67bdf8a0, 0},
+    {"1t.8d",    SNK_REGION_PROM,  0x0400,  0x0400,  0x9c4a9198, 0},
+    {"3t.9e",    SNK_REGION_PROM,  0x0800,  0x0400,  0xc93c18e8, 0},
+    {"td14.4n",  SNK_REGION_TX,    0x0000,  0x8000,  0xaf9bced5, 0},
+    {"td15.8d",  SNK_REGION_BG,    0x00000, 0x10000, 0xad6e0927, 0},
+    {"td16.8e",  SNK_REGION_BG,    0x10000, 0x10000, 0x181db036, 0},
+    {"td17.8f",  SNK_REGION_BG,    0x20000, 0x10000, 0xc5decca3, 0},
+    {"td18.8g",  SNK_REGION_BG,    0x30000, 0x10000, 0x4512cdfb, 0},
+    {"td19.8j",  SNK_REGION_BG,    0x40000, 0x10000, 0xbc17ea7f, 0},
+    {"td13.2t",  SNK_REGION_SP32,  0x00000, 0x10000, 0x88e2e819, 0},
+    {"td12-1.2s",SNK_REGION_SP32,  0x10000, 0x10000, 0xf6f83d63, 0},
+    {"td11.2r",  SNK_REGION_SP32,  0x20000, 0x10000, 0xa0d53fbd, 0},
+    {"td10-1.2p",SNK_REGION_SP32,  0x30000, 0x10000, 0xc8c71c7b, 0},
+    {"td9.2n",   SNK_REGION_SP32,  0x40000, 0x10000, 0xa8979657, 0},
+    {"td8-1.2l", SNK_REGION_SP32,  0x50000, 0x10000, 0x28f49182, 0},
+    {"td7.2k",   SNK_REGION_SP32,  0x60000, 0x10000, 0x72a5590d, 0},
+    {"td6-1.2j", SNK_REGION_SP32,  0x70000, 0x10000, 0x9b6d4053, 0},
+    {"td5.7p",   SNK_REGION_YM2,   0x00000, 0x10000, 0x04794557, 0},
+    {"td4.7n",   SNK_REGION_YM2,   0x10000, 0x10000, 0x155e472e, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
 typedef struct
 {
     const char *set_name;
@@ -1819,10 +2043,18 @@ typedef struct
 static const snk_zip_set_t snk_zip_sets[] = {
     {"ikari",    0x52a8b2dd, SNK_GAME_IKARI,    snk_ikari_files},
     {"psychos",  0x562809f4, SNK_GAME_PSYCHOS,  snk_psychos_files},
+    {"psychosj", 0x05dfb409, SNK_GAME_PSYCHOS,  snk_psychosj_files},
     {"victroad", 0xe334acef, SNK_GAME_VICTROAD, snk_victroad_files},
+    {"dogosoke", 0x37867ad2, SNK_GAME_VICTROAD, snk_dogosoke_files},
+    {"dogosokb", 0x53b0ad90, SNK_GAME_VICTROAD, snk_dogosokb_files},
     {"gwar",     0x5bcfa7dc, SNK_GAME_GWAR,     snk_gwar_files},
+    {"gwarj",    0x7f8a880c, SNK_GAME_GWAR,     snk_gwarj_files},
     {"chopper",  0xdc325860, SNK_GAME_CHOPPER,  snk_chopper_files},
+    {"choppera", 0xa4e6e978, SNK_GAME_CHOPPER,  snk_choppera_files},
+    {"chopperb", 0x8fa2f839, SNK_GAME_CHOPPER,  snk_chopperb_files},
+    {"legofair", 0x79a485c0, SNK_GAME_CHOPPER,  snk_legofair_files},
     {"tdfever",  0x92138fe4, SNK_GAME_TDFEVER,  snk_tdfever_files},
+    {"tdfeverj", 0x88d88ec4, SNK_GAME_TDFEVER,  snk_tdfeverj_files},
     {"athenab",  0xa341677e, SNK_GAME_ATHENA,   snk_athenab_files},
     {"sathena",  0x26eb2ce1, SNK_GAME_ATHENA,   snk_sathena_files},
     {"athena",   0x900a113c, SNK_GAME_ATHENA,   snk_athena_files},

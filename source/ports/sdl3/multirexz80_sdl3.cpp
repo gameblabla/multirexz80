@@ -156,6 +156,12 @@ enum Action
     ACT_RIGHT,
     ACT_A,
     ACT_B,
+    ACT_ROTATE_LEFT,
+    ACT_ROTATE_RIGHT,
+    ACT_AIM_UP,
+    ACT_AIM_DOWN,
+    ACT_AIM_LEFT,
+    ACT_AIM_RIGHT,
     ACT_M5_1,
     ACT_M5_2,
     ACT_PAUSE,
@@ -174,6 +180,12 @@ static std::array<Binding, ACT_COUNT> g_bindings = {{
     {"Right", SDL_SCANCODE_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
     {"Button 1 / Space", SDL_SCANCODE_Z, SDL_GAMEPAD_BUTTON_SOUTH},
     {"Button 2 / Enter", SDL_SCANCODE_X, SDL_GAMEPAD_BUTTON_EAST},
+    {"SNK Rotate Left", SDL_SCANCODE_Q, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+    {"SNK Rotate Right", SDL_SCANCODE_E, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    {"SNK Aim Up", SDL_SCANCODE_W, SDL_GAMEPAD_BUTTON_DPAD_UP},
+    {"SNK Aim Down", SDL_SCANCODE_S, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    {"SNK Aim Left", SDL_SCANCODE_A, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
+    {"SNK Aim Right", SDL_SCANCODE_D, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
     {"M5 1", SDL_SCANCODE_1, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
     {"M5 2", SDL_SCANCODE_2, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
     {"Pause", SDL_SCANCODE_RETURN, SDL_GAMEPAD_BUTTON_START},
@@ -1644,6 +1656,24 @@ static void apply_action(Action action, bool down)
             if (down) input.pad[0] |= INPUT_BUTTON2; else input.pad[0] &= ~INPUT_BUTTON2;
             set_m5_key(0, 0x80, down); // Enter
             break;
+        case ACT_ROTATE_LEFT:
+            if (down) input.pad[0] |= INPUT_ROTATE_LEFT; else input.pad[0] &= (uint8_t)~INPUT_ROTATE_LEFT;
+            break;
+        case ACT_ROTATE_RIGHT:
+            if (down) input.pad[0] |= INPUT_ROTATE_RIGHT; else input.pad[0] &= (uint8_t)~INPUT_ROTATE_RIGHT;
+            break;
+        case ACT_AIM_UP:
+            if (down) input.rotary_aim[0] |= INPUT_AIM_UP; else input.rotary_aim[0] &= static_cast<uint8_t>(~INPUT_AIM_UP);
+            break;
+        case ACT_AIM_DOWN:
+            if (down) input.rotary_aim[0] |= INPUT_AIM_DOWN; else input.rotary_aim[0] &= static_cast<uint8_t>(~INPUT_AIM_DOWN);
+            break;
+        case ACT_AIM_LEFT:
+            if (down) input.rotary_aim[0] |= INPUT_AIM_LEFT; else input.rotary_aim[0] &= static_cast<uint8_t>(~INPUT_AIM_LEFT);
+            break;
+        case ACT_AIM_RIGHT:
+            if (down) input.rotary_aim[0] |= INPUT_AIM_RIGHT; else input.rotary_aim[0] &= static_cast<uint8_t>(~INPUT_AIM_RIGHT);
+            break;
         case ACT_M5_1:
             set_m5_key(1, 0x01, down);
             if (down) input.system |= INPUT_START; else input.system &= ~INPUT_START;
@@ -1800,6 +1830,12 @@ static const char *input_action_script_name(Action action)
         case ACT_RIGHT: return "RIGHT";
         case ACT_A: return "A";
         case ACT_B: return "B";
+        case ACT_ROTATE_LEFT: return "ROTATE_LEFT";
+        case ACT_ROTATE_RIGHT: return "ROTATE_RIGHT";
+        case ACT_AIM_UP: return "AIM_UP";
+        case ACT_AIM_DOWN: return "AIM_DOWN";
+        case ACT_AIM_LEFT: return "AIM_LEFT";
+        case ACT_AIM_RIGHT: return "AIM_RIGHT";
         case ACT_M5_1: return "M5_1";
         case ACT_M5_2: return "M5_2";
         case ACT_PAUSE: return "P";
