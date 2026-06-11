@@ -35,6 +35,7 @@
 #define SNK_BG_SIZE        0x50000u
 #define SNK_SP16_SIZE      0x40000u
 #define SNK_PSYCHOS_SP16_SIZE 0x20000u
+#define SNK_CHOPPER_SP16_SIZE 0x20000u
 #define SNK_SP32_SIZE      0x80000u
 #define SNK_YM2_SIZE       0x40000u
 
@@ -42,6 +43,7 @@
 #define SNK_BG_ELEMENTS     (SNK_BG_SIZE / 128u)
 #define SNK_SP16_ELEMENTS   ((SNK_SP16_SIZE >> 2) / 32u)
 #define SNK_PSYCHOS_SP16_ELEMENTS ((SNK_PSYCHOS_SP16_SIZE >> 2) / 32u)
+#define SNK_CHOPPER_SP16_ELEMENTS ((SNK_CHOPPER_SP16_SIZE >> 2) / 32u)
 #define SNK_SP32_ELEMENTS   ((SNK_SP32_SIZE >> 2) / 128u)
 #define SNK_SP16_3B_ELEMENTS ((SNK_SP16_SIZE / 3u) / 32u)
 #define SNK_SP32_3B_ELEMENTS ((SNK_SP32_SIZE / 3u) / 128u)
@@ -383,8 +385,8 @@ void snk_psychos_set_game_variant(int variant)
         case SNK_GAME_GWAR:
         case SNK_GAME_CHOPPER:
             snk.rotate = SNK_ROT_CCW;
-            snk.crop_x = 8;
-            snk.crop_w = 384;
+            snk.crop_x = 0;
+            snk.crop_w = 400;
             snk.dsw1 = 0xff;
             snk.dsw2 = 0xff;
             break;
@@ -1885,6 +1887,15 @@ static void snk_decode_gfx(void)
              * allocation, causing sparse/incorrect 16x16 sprites. */
             snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_PSYCHOS_SP16_SIZE, SNK_PSYCHOS_SP16_ELEMENTS, 16);
         }
+        else if (snk.game_type == SNK_GAME_CHOPPER)
+        {
+            /* Chopper I / Legend of Air Cavalry also uses a 0x20000 16x16
+             * sprite region in MAME.  The GWAR parent has 0x40000, so using
+             * the parent stride here decodes the four 0x8000 plane ROMs as if
+             * they were four 0x10000 planes; helicopters and title objects then
+             * render with the wrong pixels. */
+            snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_CHOPPER_SP16_SIZE, SNK_CHOPPER_SP16_ELEMENTS, 16);
+        }
         else
             snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_SP16_SIZE, SNK_SP16_ELEMENTS, 16);
         snk_decode_sprite4(snk.sp32_dec, snk.sp32_rom, SNK_SP32_SIZE, SNK_SP32_ELEMENTS, 32);
@@ -1916,6 +1927,8 @@ static inline const uint8_t *sp16_tile_pixels(uint16_t code)
     }
     else if (snk.game_type == SNK_GAME_PSYCHOS)
         code %= SNK_PSYCHOS_SP16_ELEMENTS;
+    else if (snk.game_type == SNK_GAME_CHOPPER)
+        code %= SNK_CHOPPER_SP16_ELEMENTS;
     else
         code %= SNK_SP16_ELEMENTS;
     return snk.sp16_dec + ((size_t)code << 8);

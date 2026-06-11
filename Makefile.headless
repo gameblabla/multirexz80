@@ -301,6 +301,13 @@ SNK_ROMSET_OUT_DIR ?= test-results/snk_romset_controls
 test-snk-romset-controls: $(PRGNAME)
 	python3 source/tests/snk_romset_controls_regression.py --binary ./$(PRGNAME) --chopper-rom "$(SNK_ROMSET_CHOPPER_ROM)" --victroad-rom "$(SNK_ROMSET_VICTROAD_ROM)" $(if $(SNK_ROMSET_PSYCHOS_ROM),--psychos-rom "$(SNK_ROMSET_PSYCHOS_ROM)",) --out-dir $(SNK_ROMSET_OUT_DIR) --quiet
 
+CHOPPER_MAME_ROM ?= roms/chopper.zip
+CHOPPER_MAME_VIDEO ?=
+CHOPPER_MAME_OUT_DIR ?= test-results/chopper_mame
+
+test-chopper-mame: $(PRGNAME)
+	python3 source/tests/chopper_mame_regression.py --binary ./$(PRGNAME) --rom "$(CHOPPER_MAME_ROM)" --out-dir $(CHOPPER_MAME_OUT_DIR) $(if $(CHOPPER_MAME_VIDEO),--mame-video "$(CHOPPER_MAME_VIDEO)",) --quiet
+
 ROM_BUNDLE_SMOKE_ROM_DIR ?= roms
 ROM_BUNDLE_SMOKE_OUT_DIR ?= test-results/rom_bundle_smoke
 ROM_BUNDLE_SMOKE_FRAMES ?= 3600
@@ -318,7 +325,7 @@ TEST_ALL_JOBS ?= 1
 TEST_ALL_COLECO_BIOS ?=
 TEST_ALL_TARGETS ?=
 
-.PHONY: test-all test-rom-bundle-smoke
+.PHONY: test-all test-rom-bundle-smoke test-chopper-mame
 
 test-all: $(PRGNAME)
 	python3 source/tests/run_all_headless_tests.py --root . --makefile Makefile.headless --rom-dir "$(TEST_ALL_ROM_DIR)" --out-dir "$(TEST_ALL_OUT_DIR)" --timeout $(TEST_ALL_TIMEOUT) $(if $(TEST_ALL_COLECO_BIOS),--coleco-bios "$(TEST_ALL_COLECO_BIOS)",) --jobs $(TEST_ALL_JOBS) $(if $(TEST_ALL_TARGETS),--targets $(TEST_ALL_TARGETS),)

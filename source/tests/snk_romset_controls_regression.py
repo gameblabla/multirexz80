@@ -77,7 +77,7 @@ def main(argv=None):
 
     chopper_ppm = out_dir / 'chopper_3600.ppm'
     log = run_capture(args.binary, args.chopper_rom, 3600, chopper_ppm)
-    st = assert_not_blank('chopper', chopper_ppm, min_colors=24, allowed_sizes={(224, 384)})
+    st = assert_not_blank('chopper', chopper_ppm, min_colors=24, allowed_sizes={(224, 400)})
     report.append(('chopper', st, log.strip().splitlines()[-1] if log.strip() else ''))
 
     # Victory Road starts and then exercises movement/fire. The regression is that c100/c200/c300
