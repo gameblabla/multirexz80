@@ -195,6 +195,13 @@ static int parse_cli(int argc, char **argv, cli_options_t *cli)
         else if (!strcmp(a, "--input-record")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.input_record_path = argv[i]; }
         else if (!strcmp(a, "--input-tap-frames")) { uint64_t v = 0; if (!need_value(argc, argv, &i) || !parse_u64_arg(argv[i], &v)) return 0; cli->platform.input_tap_frames = (uint32_t)v; }
         else if (!strcmp(a, "--audio-wav")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.audio_wav_path = argv[i]; }
+        else if (!strcmp(a, "--audio-highpass-hz")) { if (!need_value(argc, argv, &i)) return 0; option.audio_highpass_hz = atoi(argv[i]); if (option.audio_highpass_hz < 0) option.audio_highpass_hz = 0; }
+        else if (!strcmp(a, "--audio-lowpass-hz")) { if (!need_value(argc, argv, &i)) return 0; option.audio_lowpass_hz = atoi(argv[i]); if (option.audio_lowpass_hz < 0) option.audio_lowpass_hz = 0; }
+        else if (!strcmp(a, "--audio-headroom-db")) { if (!need_value(argc, argv, &i)) return 0; option.audio_headroom_db = atoi(argv[i]); if (option.audio_headroom_db < 0) option.audio_headroom_db = 0; if (option.audio_headroom_db > 9) option.audio_headroom_db = 9; }
+        else if (!strcmp(a, "--audio-dc-blocker")) option.audio_dc_blocker = 1;
+        else if (!strcmp(a, "--no-audio-dc-blocker")) option.audio_dc_blocker = 0;
+        else if (!strcmp(a, "--audio-limiter")) option.audio_limiter = 1;
+        else if (!strcmp(a, "--no-audio-limiter")) option.audio_limiter = 0;
         else if (!strcmp(a, "--trace")) { if (!need_value(argc, argv, &i)) return 0; cli->platform.trace_path = argv[i]; }
         else if (!strcmp(a, "--debug-console")) { if (!need_value(argc, argv, &i)) return 0; cli->debug_console_path = argv[i]; }
         else if (!strcmp(a, "--debug-console-stop")) { if (!need_value(argc, argv, &i)) return 0; cli->debug_console_stop_text = argv[i]; }

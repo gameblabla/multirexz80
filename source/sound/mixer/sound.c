@@ -525,12 +525,7 @@ void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length)
 {
 	int32_t i;
 	int32_t level = option.soundlevel ? option.soundlevel : 1;
-	int32_t gain_num = 1024; /* Match the old double-output loudness at 0 dB headroom. */
-
-	if (option.audio_headroom_db <= 0) gain_num = 1024;
-	else if (option.audio_headroom_db <= 3) gain_num = 724;
-	else if (option.audio_headroom_db <= 6) gain_num = 512;
-	else gain_num = 362;
+	int32_t gain_num = snk_psychos_audio_mixer_gain_num(option.audio_headroom_db);
 
 	snk_audio_filter_update();
 
@@ -556,9 +551,6 @@ void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length)
 			snk_audio_filter.lp_y[2] += (int32_t)(((int64_t)snk_audio_filter.lp_alpha_q15 * (snk_audio_filter.lp_y[1] - snk_audio_filter.lp_y[2])) >> 15);
 			v = snk_audio_filter.lp_y[2];
 		}
-
-		if (option.audio_highpass_hz || option.audio_lowpass_hz)
-			v <<= 2;
 
 		v *= level;
 

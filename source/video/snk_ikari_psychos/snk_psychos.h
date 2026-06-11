@@ -65,6 +65,7 @@ void snk_psychos_reset(void);
 void snk_psychos_frame(uint32_t skip_render);
 void snk_psychos_sound_reset(void);
 void snk_psychos_sound_update(int16_t **buffer, int32_t length);
+int snk_psychos_audio_mixer_gain_num(int headroom_db);
 uint32_t snk_psychos_state_size(void);
 int snk_psychos_save_state(FILE *fd);
 int snk_psychos_load_state(FILE *fd, uint32_t size);

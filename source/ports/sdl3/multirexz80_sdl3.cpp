@@ -18,6 +18,7 @@
 extern "C" {
 #include "shared.h"
 #include "input_script.h"
+#include "miniz.h"
 }
 
 #include <SDL3/SDL.h>
@@ -58,6 +59,9 @@ extern "C" {
 #endif
 #ifndef SDL_SCANCODE_F11
 #define SDL_SCANCODE_F11 ((SDL_Scancode)68)
+#endif
+#ifndef SDL_SCANCODE_F12
+#define SDL_SCANCODE_F12 ((SDL_Scancode)69)
 #endif
 #ifndef SDL_GAMEPAD_BUTTON_INVALID
 #define SDL_GAMEPAD_BUTTON_INVALID ((SDL_GamepadButton)-1)
@@ -120,7 +124,7 @@ static std::string g_sram_path;
 static uint8_t g_m5_text_pulse[SORDM5_KEY_ROWS];
 
 static constexpr int BITMAP_W = 400;
-static constexpr int BITMAP_H = 313;
+static constexpr int BITMAP_H = 400;
 
 struct UiSettings
 {
@@ -170,6 +174,7 @@ enum Action
     ACT_SAVE_STATE,
     ACT_LOAD_STATE,
     ACT_REWIND,
+    ACT_SCREENSHOT,
     ACT_COUNT
 };
 
@@ -194,6 +199,7 @@ static std::array<Binding, ACT_COUNT> g_bindings = {{
     {"Save State", SDL_SCANCODE_F5, SDL_GAMEPAD_BUTTON_INVALID},
     {"Load State", SDL_SCANCODE_F8, SDL_GAMEPAD_BUTTON_INVALID},
     {"Rewind", SDL_SCANCODE_F6, SDL_GAMEPAD_BUTTON_INVALID},
+    {"Screenshot", SDL_SCANCODE_F12, SDL_GAMEPAD_BUTTON_INVALID},
 }};
 
 struct ColecoKeyBinding
@@ -361,6 +367,7 @@ struct AppState
     int rewind_thumb_h = 0;
     std::filesystem::path state_dir;
     std::filesystem::path save_dir;
+    std::filesystem::path screenshot_dir;
     std::filesystem::path config_dir;
     SDL_Texture *state_thumb_texture = nullptr;
     std::filesystem::path state_thumb_path;
@@ -679,6 +686,7 @@ static void init_user_paths(AppState &app)
     app.config_dir = root;
     app.state_dir = root / "states";
     app.save_dir = root / "saves";
+    app.screenshot_dir = root / "screenshots";
 }
 
 static std::filesystem::path sdl3_config_path(const AppState &app)
@@ -1225,6 +1233,90 @@ static std::vector<uint32_t> capture_active_preview(int &preview_w, int &preview
         }
     }
     return preview;
+}
+
+
+static std::filesystem::path screenshot_path_for_frame(AppState &app)
+{
+    std::filesystem::path rp(app.rom_path.empty() ? "frame" : app.rom_path);
+    const std::string stem = sanitize_component(rp.stem().string());
+    std::filesystem::path dir = app.screenshot_dir.empty() ? (app.ui.launch_cwd / "screenshots") : app.screenshot_dir;
+    for (unsigned attempt = 0; attempt < 1000; attempt++)
+    {
+        char suffix[96];
+        if (attempt == 0)
+            std::snprintf(suffix, sizeof(suffix), "_%08X_%010llu.png", cart.crc,
+                          static_cast<unsigned long long>(app.frame_counter));
+        else
+            std::snprintf(suffix, sizeof(suffix), "_%08X_%010llu_%03u.png", cart.crc,
+                          static_cast<unsigned long long>(app.frame_counter), attempt);
+        std::filesystem::path path = dir / (stem + suffix);
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) return path;
+    }
+    return dir / (stem + "_screenshot.png");
+}
+
+static bool save_screenshot_png(AppState &app)
+{
+    if (!app.rom_loaded)
+    {
+        app.status = "No game loaded.";
+        return false;
+    }
+
+    int w = 0, h = 0, view_x = 0, view_y = 0, view_w = 0, view_h = 0;
+    std::vector<uint32_t> xrgb = capture_active_preview(w, h, view_x, view_y, view_w, view_h);
+    (void)view_x; (void)view_y; (void)view_w; (void)view_h;
+    if (xrgb.empty() || w <= 0 || h <= 0)
+    {
+        app.status = "Screenshot failed: empty frame.";
+        return false;
+    }
+
+    std::vector<unsigned char> rgba(static_cast<size_t>(w) * h * 4u);
+    for (size_t i = 0; i < xrgb.size(); i++)
+    {
+        const uint32_t p = xrgb[i];
+        rgba[i * 4u + 0u] = static_cast<unsigned char>((p >> 16) & 0xffu);
+        rgba[i * 4u + 1u] = static_cast<unsigned char>((p >> 8) & 0xffu);
+        rgba[i * 4u + 2u] = static_cast<unsigned char>(p & 0xffu);
+        rgba[i * 4u + 3u] = 0xffu;
+    }
+
+    const std::filesystem::path path = screenshot_path_for_frame(app);
+    if (!ensure_state_dir(path.parent_path()))
+    {
+        app.status = "Could not create screenshot directory: " + path.parent_path().string();
+        return false;
+    }
+
+    size_t png_len = 0;
+    void *png = tdefl_write_image_to_png_file_in_memory_ex(rgba.data(), w, h, 4, &png_len, 6, MZ_FALSE);
+    if (!png || png_len == 0)
+    {
+        if (png) mz_free(png);
+        app.status = "Screenshot PNG encoding failed.";
+        return false;
+    }
+
+    std::FILE *fp = std::fopen(path.string().c_str(), "wb");
+    if (!fp)
+    {
+        mz_free(png);
+        app.status = "Could not open screenshot: " + path.string();
+        return false;
+    }
+    const size_t wrote = std::fwrite(png, 1, png_len, fp);
+    std::fclose(fp);
+    mz_free(png);
+    if (wrote != png_len)
+    {
+        app.status = "Screenshot write failed: " + path.string();
+        return false;
+    }
+    app.status = "Saved screenshot: " + path.string();
+    return true;
 }
 
 static void capture_rewind_preview(RewindSnapshot &snap)
@@ -1815,6 +1907,11 @@ static bool handle_action_command(AppState &app, Action action, bool down)
         app.rewind_hold = down;
         if (down && !app.rewind_enabled)
             app.status = "Rewind is disabled.";
+        return true;
+    }
+    if (action == ACT_SCREENSHOT)
+    {
+        if (down) save_screenshot_png(app);
         return true;
     }
     return false;
@@ -2448,6 +2545,15 @@ static void draw_menu(AppState &app)
             if (ImGui::Checkbox("Fullscreen (F11)", &fullscreen))
                 sdl3_set_fullscreen(app, fullscreen);
             ImGui::Text("Active viewport: %d x %d", bitmap.viewport.w, bitmap.viewport.h);
+            ImGui::Text("SDL3 backing bitmap: %d x %d", BITMAP_W, BITMAP_H);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Capture"))
+        {
+            ImGui::TextWrapped("Screenshots are written as exact active-frame PNGs before window scaling, filtering, or ImGui overlays. Use this path for renderer comparisons instead of desktop/window captures.");
+            ImGui::Text("Directory: %s", app.screenshot_dir.string().c_str());
+            ImGui::Text("Output geometry: %d x %d", bitmap.viewport.w, bitmap.viewport.h);
+            if (ImGui::Button("Save PNG screenshot (F12)")) save_screenshot_png(app);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Keyboard")) { draw_keyboard_controls(app); ImGui::EndTabItem(); }
@@ -2787,6 +2893,7 @@ int main(int argc, char **argv)
     normalize_audio_options();
     ensure_state_dir(app.state_dir);
     ensure_state_dir(app.save_dir);
+    ensure_state_dir(app.screenshot_dir);
     if (!init_bitmap()) return 1;
     if (!init_sdl(app))
     {

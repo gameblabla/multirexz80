@@ -69,6 +69,7 @@ void snk_psychos_reset(void) { }
 void snk_psychos_frame(uint32_t skip_render) { (void)skip_render; }
 void snk_psychos_sound_reset(void) { }
 void snk_psychos_sound_update(int16_t **buffer, int32_t length) { (void)buffer; (void)length; }
+int snk_psychos_audio_mixer_gain_num(int headroom_db) { (void)headroom_db; return 384; }
 uint32_t snk_psychos_state_size(void) { return 0; }
 int snk_psychos_save_state(FILE *fd) { (void)fd; return 0; }
 int snk_psychos_load_state(FILE *fd, uint32_t size) { (void)fd; (void)size; return 0; }

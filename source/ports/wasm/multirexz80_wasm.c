@@ -16,7 +16,7 @@
 #include "shared.h"
 
 #define WASM_BITMAP_WIDTH  400
-#define WASM_BITMAP_HEIGHT 313
+#define WASM_BITMAP_HEIGHT 400
 
 #if defined(__clang__)
 #define WASM_EXPORT __attribute__((visibility("default")))

@@ -308,6 +308,14 @@ CHOPPER_MAME_OUT_DIR ?= test-results/chopper_mame
 test-chopper-mame: $(PRGNAME)
 	python3 source/tests/chopper_mame_regression.py --binary ./$(PRGNAME) --rom "$(CHOPPER_MAME_ROM)" --out-dir $(CHOPPER_MAME_OUT_DIR) $(if $(CHOPPER_MAME_VIDEO),--mame-video "$(CHOPPER_MAME_VIDEO)",) --quiet
 
+
+CHOPPER_AUDIO_ROM ?= roms/chopper.zip
+CHOPPER_AUDIO_MAME_VIDEO ?=
+CHOPPER_AUDIO_OUT_DIR ?= test-results/chopper_audio
+
+test-chopper-audio: $(PRGNAME)
+	python3 source/tests/chopper_audio_mame_regression.py --binary ./$(PRGNAME) --rom "$(CHOPPER_AUDIO_ROM)" --out-dir $(CHOPPER_AUDIO_OUT_DIR) $(if $(CHOPPER_AUDIO_MAME_VIDEO),--mame-video "$(CHOPPER_AUDIO_MAME_VIDEO)",) --quiet
+
 ROM_BUNDLE_SMOKE_ROM_DIR ?= roms
 ROM_BUNDLE_SMOKE_OUT_DIR ?= test-results/rom_bundle_smoke
 ROM_BUNDLE_SMOKE_FRAMES ?= 3600
@@ -318,6 +326,12 @@ test-rom-bundle-smoke: $(PRGNAME)
 
 
 
+SDL3_FRONTEND_STATIC_SOURCE ?= source/ports/sdl3/multirexz80_sdl3.cpp
+
+test-sdl3-frontend-static:
+	python3 source/tests/sdl3_frontend_static_regression.py --source $(SDL3_FRONTEND_STATIC_SOURCE)
+
+
 TEST_ALL_ROM_DIR ?= roms
 TEST_ALL_OUT_DIR ?= test-results/all
 TEST_ALL_TIMEOUT ?= 300
@@ -325,7 +339,7 @@ TEST_ALL_JOBS ?= 1
 TEST_ALL_COLECO_BIOS ?=
 TEST_ALL_TARGETS ?=
 
-.PHONY: test-all test-rom-bundle-smoke test-chopper-mame
+.PHONY: test-all test-rom-bundle-smoke test-chopper-mame test-chopper-audio test-sdl3-frontend-static
 
 test-all: $(PRGNAME)
 	python3 source/tests/run_all_headless_tests.py --root . --makefile Makefile.headless --rom-dir "$(TEST_ALL_ROM_DIR)" --out-dir "$(TEST_ALL_OUT_DIR)" --timeout $(TEST_ALL_TIMEOUT) $(if $(TEST_ALL_COLECO_BIOS),--coleco-bios "$(TEST_ALL_COLECO_BIOS)",) --jobs $(TEST_ALL_JOBS) $(if $(TEST_ALL_TARGETS),--targets $(TEST_ALL_TARGETS),)

@@ -69,7 +69,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "psychos",
         "frames": 3600,
         "screenshot_sha256": "aced9ac000a96edeacd3f79f4741e42b0484577d97e442151a42130b4d355b8b",
-        "pcm_sha256": "1882368a44c4b39b8f970977f70507087611d3b34693b0a7fff4d92c90311266",
+        "pcm_sha256": "85de2aade8646c77d215b6829e91e2b243e1d1598a99c2e87e79e30e5590a69e",
     },
     "ikari": {
         "roms": ["ikari.zip"],
