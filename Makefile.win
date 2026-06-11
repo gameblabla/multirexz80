@@ -1,0 +1,171 @@
+# Native Windows frontend cross-build for MultiRexZ80.
+#
+# Builds both Win64 and Win32 executables with MinGW-w64:
+#   make -f Makefile.win
+#
+# Override compilers if your distribution uses different triplet names:
+#   make -f Makefile.win CC64=/opt/mingw64/bin/x86_64-w64-mingw32-gcc CC32=/opt/mingw32/bin/i686-w64-mingw32-gcc
+
+THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+ROOT := $(abspath $(dir $(THIS_MAKEFILE)))
+
+CC64 ?= x86_64-w64-mingw32-gcc
+CC32 ?= i686-w64-mingw32-gcc
+WINDRES64 ?= x86_64-w64-mingw32-windres
+WINDRES32 ?= i686-w64-mingw32-windres
+
+PSG_ENGINE ?= mame_sn76489
+ifneq ($(origin SOUND_ENGINE), undefined)
+PSG_ENGINE := $(SOUND_ENGINE)
+endif
+Z80_CORE ?= z80
+RENDER_BPP ?= 32
+ENABLE_ARCADE ?= 1
+ENABLE_COLECO ?= 1
+ENABLE_SORDM5 ?= 1
+STATIC_MEMORY ?= 0
+STATIC_MEMORY_BYTES ?= 16777216
+
+OUT_DIR ?= $(ROOT)/build/windows
+BUILD64 := $(OUT_DIR)/win64
+BUILD32 := $(OUT_DIR)/win32
+TARGET64 := $(ROOT)/MultiRexZ80-win64.exe
+TARGET32 := $(ROOT)/MultiRexZ80-win32.exe
+
+PSG_DEFS :=
+ifeq ($(PSG_ENGINE),mame_sn76489)
+PSG_DEFS += -DMAME_PSG
+endif
+RENDER_DEFS :=
+ifeq ($(RENDER_BPP),32)
+RENDER_DEFS += -DMULTIREXZ80_RENDER_32BPP
+endif
+FEATURE_DEFS := -DMULTIREXZ80_ENABLE_ARCADE=$(ENABLE_ARCADE) -DMULTIREXZ80_ENABLE_COLECO=$(ENABLE_COLECO) -DMULTIREXZ80_ENABLE_SORDM5=$(ENABLE_SORDM5)
+STATIC_DEFS :=
+ifeq ($(STATIC_MEMORY),1)
+STATIC_DEFS += -DMULTIREXZ80_STATIC_MEMORY -DMULTIREXZ80_STATIC_MEMORY_BYTES=$(STATIC_MEMORY_BYTES)
+endif
+
+CORE_DIRS := \
+  source \
+  source/other/eeprom/93c46 \
+  source/other/decode \
+  source/video/sms_vdp \
+  source/video/tms9918 \
+  source/sound/mixer \
+  source/sound/opll \
+  source/sound/opl1 \
+  source/cpu_cores/$(Z80_CORE) \
+  source/sound/psg/$(PSG_ENGINE) \
+  source/ports/win32
+
+ifeq ($(ENABLE_COLECO),1)
+CORE_DIRS += source/platform/coleco
+endif
+ifeq ($(ENABLE_SORDM5),1)
+CORE_DIRS += source/platform/sord_m5
+endif
+ifeq ($(ENABLE_ARCADE),1)
+CORE_DIRS += source/video/sega_system1 source/video/snk_ikari_psychos
+else
+CORE_DIRS += source/platform/arcade_disabled
+endif
+
+ZIP_C := source/unzip/miniz.c source/unzip/fileio.c source/unzip/ioapi.c source/unzip/unzip.c
+SRC_C := $(foreach dir,$(CORE_DIRS),$(wildcard $(dir)/*.c)) $(ZIP_C)
+OBJ64 := $(patsubst %.c,$(BUILD64)/%.o,$(SRC_C))
+OBJ32 := $(patsubst %.c,$(BUILD32)/%.o,$(SRC_C))
+RES64 := $(BUILD64)/source/ports/win32/multirexz80_win32.res.o
+RES32 := $(BUILD32)/source/ports/win32/multirexz80_win32.res.o
+
+# NOTE: do NOT define -Dstrcasecmp=_stricmp / -Dstrncasecmp=_strnicmp here.
+# MinGW-w64 already provides strcasecmp()/strncasecmp() via <string.h>.  Worse,
+# GCC treats strcasecmp/strncasecmp as builtins, and rewriting the builtin name
+# to _stricmp/_strnicmp via -D makes the optimizer (GCC 14) emit a "jmp self"
+# infinite loop (eb fe) for every call site instead of the comparison.  That
+# silently froze ROM/ZIP loading at 99% CPU (e.g. zip_path_stem_ieq during
+# arcade-set detection).  Rely on the native MinGW declarations instead.
+COMMON_DEFS := -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_WIN32 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS) $(STATIC_DEFS)
+PROJECT_INC_DIRS := source source/other/eeprom/93c46 source/other/decode source/platform/coleco source/platform/sord_m5 source/video/sms_vdp source/video/tms9918 source/video/sega_system1 source/video/snk_ikari_psychos source/sound/mixer source/sound/opll source/opl1 source/sound/opl1 source/sound/psg/$(PSG_ENGINE) source/cpu_cores/$(Z80_CORE) source/ports/win32 source/sound_output source/unzip
+# Use -iquote rather than -I for project headers so MinGW's own system headers
+# (notably <basetsd.h>) cannot be shadowed by files under source/.
+COMMON_INC := $(addprefix -iquote ,$(PROJECT_INC_DIRS))
+CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -std=gnu99
+HOT_CFLAGS ?= -O3 -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+OPL_CFLAGS ?= -Ofast -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+LDFLAGS ?= -static -static-libgcc -mwindows
+LDLIBS := -lwinmm -lgdi32 -lcomdlg32 -lshell32 -lcomctl32 -lole32 -luuid -ladvapi32 -luser32 -lkernel32 -lm
+# The Win64 build adds the Direct3D 11 presenter (source/ports/win32/win_d3d11.c,
+# guarded by _WIN64).  d3dcompiler is loaded at runtime via LoadLibrary, so only
+# the core D3D11/DXGI import libs are needed at link time.  The Win32 build stays
+# GDI-only and does not link these.
+# The Win64 build also uses bundled SDL3 for game-controller input (its gamepad
+# database / robust handling of unusual pads).  SDL3 is built static from
+# appmake/SDL3-*.tar.gz by appmake/build_sdl3_mingw.sh.  The Win32 (Win95-class)
+# build uses WinMM instead and never links SDL.  Set WIN64_SDL=0 to build the
+# Win64 frontend without SDL (keyboard only).
+WIN64_SDL ?= 1
+SDL_PREFIX := $(ROOT)/appmake/sdl/install/win64
+SDL_LIB := $(SDL_PREFIX)/lib/libSDL3.a
+ifeq ($(WIN64_SDL),1)
+SDL_CFLAGS := -I$(SDL_PREFIX)/include -DMULTIREXZ80_HAVE_SDL3
+# Static SDL3 dependencies.  These MUST follow libSDL3.a on the link line (static
+# archives only satisfy references from objects listed before them), so the set
+# is repeated here even though some libs also appear in LDLIBS.  Covers COM/OLE
+# (CoCreateInstance, GUID_NULL), DirectInput/HIDAPI joystick, WASAPI, etc.
+SDL_LINK := $(SDL_LIB) -lole32 -loleaut32 -luuid -ldxguid -ldinput8 -lhid -lcfgmgr32 -lsetupapi -limm32 -lversion -lwinmm -lgdi32 -ladvapi32 -lshell32 -luser32 -lkernel32 -lbcrypt -lws2_32 -lntdll -lm
+SDL_DEP := $(SDL_LIB)
+else
+SDL_CFLAGS :=
+SDL_LINK :=
+SDL_DEP :=
+endif
+LDLIBS64 := $(LDLIBS) -ld3d11 -ldxgi -ldxguid $(SDL_LINK)
+
+.DEFAULT_GOAL := all
+.PHONY: all win64 win32 check-toolchains sdl sdl-clean clean
+
+all: win64 win32
+win64: check-toolchain64 $(SDL_DEP) $(TARGET64)
+win32: check-toolchain32 $(TARGET32)
+
+# Build (or rebuild) the bundled static SDL3 for Win64.  Idempotent: the script
+# skips extraction/configure when already done.
+sdl: $(SDL_LIB)
+$(SDL_LIB):
+	@echo "Building bundled SDL3 for Win64..."
+	CC="$(CC64)" CXX="$(patsubst %gcc,%g++,$(CC64))" RC="$(WINDRES64)" "$(ROOT)/appmake/build_sdl3_mingw.sh" win64
+sdl-clean:
+	rm -rf $(ROOT)/appmake/sdl/build/win64 $(ROOT)/appmake/sdl/install/win64
+
+check-toolchain64:
+	@command -v $(CC64) >/dev/null 2>&1 || { echo "missing Win64 MinGW compiler: $(CC64)" >&2; exit 1; }
+	@command -v $(WINDRES64) >/dev/null 2>&1 || { echo "missing Win64 resource compiler: $(WINDRES64)" >&2; exit 1; }
+check-toolchain32:
+	@command -v $(CC32) >/dev/null 2>&1 || { echo "missing Win32 MinGW compiler: $(CC32)" >&2; exit 1; }
+	@command -v $(WINDRES32) >/dev/null 2>&1 || { echo "missing Win32 resource compiler: $(WINDRES32)" >&2; exit 1; }
+
+$(TARGET64): $(OBJ64) $(RES64)
+	$(CC64) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) -o $@ $^ $(LDFLAGS) $(LDLIBS64)
+
+$(TARGET32): $(OBJ32) $(RES32)
+	$(CC32) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILD64)/%.o: %.c Makefile.win | $(SDL_DEP)
+	@mkdir -p $(dir $@)
+	$(CC64) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(SDL_CFLAGS) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
+
+$(BUILD32)/%.o: %.c Makefile.win
+	@mkdir -p $(dir $@)
+	$(CC32) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
+
+$(RES64): source/ports/win32/multirexz80_win32.rc resources/sms.ico Makefile.win
+	@mkdir -p $(dir $@)
+	$(WINDRES64) --codepage=65001 --output-format=coff --target=pe-x86-64 -i $< -o $@
+
+$(RES32): source/ports/win32/multirexz80_win32.rc resources/sms.ico Makefile.win
+	@mkdir -p $(dir $@)
+	$(WINDRES32) --codepage=65001 --output-format=coff --target=pe-i386 -i $< -o $@
+
+clean:
+	rm -rf $(OUT_DIR) $(TARGET64) $(TARGET32)

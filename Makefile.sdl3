@@ -109,3 +109,7 @@ $(OBJS_CPP): %.opp: %.cpp
 
 clean:
 	rm -f $(PRGNAME) *.o *.opp
+
+.PHONY: package appmake
+package appmake:
+	./appmake/make_appimage.sh
