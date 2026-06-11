@@ -1020,6 +1020,26 @@ static const system1_zip_file_t sys1_blockgalb_files[] = {
     {NULL, 0, 0, 0, 0, 0}
 };
 
+
+static const system1_zip_file_t sys1_choplift_files[] = {
+    {"epr-7124.ic90", SYS1_REGION_MAIN, 0x00000, 0x8000, 0x678d5c41, SYS1_FILE_COPY_TO_OPS},
+    {"epr-7125.ic91", SYS1_REGION_MAIN, 0x10000, 0x8000, 0xf5283498, SYS1_FILE_COPY_TO_OPS},
+    {"epr-7126.ic92", SYS1_REGION_MAIN, 0x18000, 0x8000, 0xdbd192ab, SYS1_FILE_COPY_TO_OPS},
+    {"epr-7130.ic126", SYSTEM1_REGION_SOUND, 0x0000, 0x8000, 0x346af118, 0},
+    {"epr-7127.ic4", SYSTEM1_REGION_TILES, 0x00000, 0x8000, 0x1e708f6d, 0},
+    {"epr-7128.ic5", SYSTEM1_REGION_TILES, 0x08000, 0x8000, 0xb922e787, 0},
+    {"epr-7129.ic6", SYSTEM1_REGION_TILES, 0x10000, 0x8000, 0xbd3b6e6e, 0},
+    {"epr-7121.ic87", SYSTEM1_REGION_SPRITES, 0x00000, 0x8000, 0xf2b88f73, 0},
+    {"epr-7120.ic86", SYSTEM1_REGION_SPRITES, 0x08000, 0x8000, 0x517d7fd3, 0},
+    {"epr-7123.ic89", SYSTEM1_REGION_SPRITES, 0x10000, 0x8000, 0x8f16a303, 0},
+    {"epr-7122.ic88", SYSTEM1_REGION_SPRITES, 0x18000, 0x8000, 0x7c93f160, 0},
+    {"pr7119.ic20", SYSTEM1_REGION_COLOR, 0x0000, 0x0100, 0xb2a8260f, 0},
+    {"pr7118.ic14", SYSTEM1_REGION_COLOR, 0x0100, 0x0100, 0x693e20c7, 0},
+    {"pr7117.ic8",  SYSTEM1_REGION_COLOR, 0x0200, 0x0100, 0x4124307e, 0},
+    {"pr5317.ic28", SYSTEM1_REGION_PROM, 0x0000, 0x0100, 0x648350b8, 0},
+    {NULL, 0, 0, 0, 0, 0}
+};
+
 static const system1_zip_file_t sys1_chopliftu_files[] = {
     {"epr-7152.ic90", SYS1_REGION_MAIN, 0x00000, 0x8000, 0xfe49d83e, SYS1_FILE_COPY_TO_OPS},
     {"epr-7153.ic91", SYS1_REGION_MAIN, 0x10000, 0x8000, 0x48697666, SYS1_FILE_COPY_TO_OPS},
@@ -1417,6 +1437,7 @@ static const system1_zip_set_t system1_sets[] = {
     {"ufosensi",   0x20000, 0xf3e394e2, system1_set_game_ufosensi,       sys1_ufosensi_files, system1_postload_ufosensi_mc8123},
     {"blockgal",    0x10000, 0xa99b231a, system1_set_game_blockgal_mc8123, sys1_blockgal_files,  system1_postload_blockgal_mc8123},
     {"blockgalb",   0x10000, 0x65c47676, system1_set_game_blockgal,        sys1_blockgalb_files, NULL},
+    {"choplift",    0x20000, 0x678d5c41, system1_set_game_choplifter,      sys1_choplift_files, NULL},
     {"chopliftu",   0x20000, 0xfe49d83e, system1_set_game_choplifter,      sys1_chopliftu_files, NULL},
     {"chopliftbl",  0x20000, 0x71a37932, system1_set_game_choplifter,      sys1_chopliftbl_files, NULL},
     {"flicky",      0x10000, 0x296f1492, system1_set_game_flicky,          sys1_flicky_files, system1_postload_flicky_315_5051},

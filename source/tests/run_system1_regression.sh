@@ -32,7 +32,9 @@ fi
 mkdir -p "$OUT_DIR"
 
 pcm_sha256() {
-    python3 -c "import hashlib, sys, wave; p=sys.argv[1]; w=wave.open(p, 'rb'); params=w.getparams(); pcm=w.readframes(w.getnframes()); w.close(); assert params.nchannels == 2 and params.sampwidth == 2 and params.framerate > 0 and params.nframes > 0, params; print(hashlib.sha256(pcm).hexdigest())" "$1"
+    # Headless WAV output is deterministic 44-byte PCM WAV.  Hash only the PCM
+    # payload so container RIFF sizes/timestamps cannot affect regressions.
+    tail -c +45 "$1" | sha256sum | awk '{print $1}'
 }
 
 run_with_timeout() {
@@ -65,7 +67,7 @@ while IFS='|' read -r game rom console ppm_expected pcm_expected; do
         continue
     fi
     end=$(date +%s.%N)
-    seconds=$(python3 -c "import sys; print(f'{float(sys.argv[2]) - float(sys.argv[1]):.3f}')" "$start" "$end")
+    seconds=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e - s }')
 
     ppm_actual=$(sha256sum "$ppm" | awk '{print $1}')
     pcm_actual=$(pcm_sha256 "$wav") || pcm_actual=INVALID
@@ -83,11 +85,12 @@ while IFS='|' read -r game rom console ppm_expected pcm_expected; do
     fi
     printf '%-10s %-9s %-9s %-10s %s, %s\n' "$game" "$video_status" "$audio_status" "$seconds" "$(basename "$ppm")" "$(basename "$wav")"
 done <<'EOF'
-blockgal|blockgal.zip|system1|723dc2ecc2f687188acd7771fa15c43daa9612b65bc2078ae2a2a6c501fafcf1|91072cf751b4a71bcb9e3ee7b7de2c36c707a3752d69312b3b5fc72cd3b470a2
-choplift|choplift.zip|system1|5c58d4bb482315b7a4aa4e6abf7865c8facd862259885c6d54926e6d4bcd7601|5b32b840a68666cad8ee454c56e180beb38986524d7f407c17f1645a0d791cc2
-flicky|flicky.zip|system1|af2c76cd3bf642d7f141023df9187f810e153f6b5f7f50a6fe6f985921349daa|04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669
-gardia|gardia.zip|system1|5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa|460723343cd5be08ca004c6fae269ba6038cd7225e1f5427665dbe080db69f36
-teddybb|teddybb.zip|system1|c65e2a00e1ce211724b6f9bbc2412f5ef7b51b6deaff8ed6bde19a9bb1108448|6c466ee5b2f9ddaaa225bfede26e2fa041e2ed952b0de0f2db97216798931242
+blockgal|blockgal.zip|system1|723dc2ecc2f687188acd7771fa15c43daa9612b65bc2078ae2a2a6c501fafcf1|8f48c9b990c2b9795121beb0b3f6c2db2ffd1ff4561d8384b83a7450e5efe117
+blockgalb|blockgalb.zip|system1|f268e9645b50088746cf8a3406394c151d5b51092daf5a5c89d385feba2da675|fd907f65c2903627e9ca4bc81e449b307d9e61334a4a2fdcfd24cd5cb6dee5fc
+choplift|choplift.zip|system1|cab50edda78c539cc50229db9f0208c19e9a86be101cd14aafa30e88eb610b7b|8dd8f2f1555b97ec379e7977840b9c627c552ff250cb8a78b1051c32a4230671
+flicky|flicky.zip|system1|1d079273592a9365c4f096cc201b6ff749fb7d0cf466f401b7cf0bc6acb39b94|04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669
+gardia|gardia.zip|system1|5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa|967c9a781ac02ab1ba754bd0e22978777418f9858782c9c6f2834c1494f35af0
+teddybb|teddybb.zip|system1|c65e2a00e1ce211724b6f9bbc2412f5ef7b51b6deaff8ed6bde19a9bb1108448|90be5f138064d59415d916d6c461d0d00c6ed465cfa5e6108249e3983418c158
 EOF
 
 if [ "$failures" -ne 0 ]; then

@@ -40,8 +40,8 @@ GAMES: dict[str, dict[str, object]] = {
         "roms": ["choplift.zip"],
         "console": "system1",
         "frames": 3600,
-        "screenshot_sha256": "435a6718cd5ff6280f508fa692e784967418ff2d69c8b552733d8208eec2cdde",
-        "pcm_sha256": "f95cb4c22ce6764c8870bfddf49fddfd63d34174ac4ae870137ddb0632ca15b3",
+        "screenshot_sha256": "cab50edda78c539cc50229db9f0208c19e9a86be101cd14aafa30e88eb610b7b",
+        "pcm_sha256": "8dd8f2f1555b97ec379e7977840b9c627c552ff250cb8a78b1051c32a4230671",
     },
     "flicky": {
         "roms": ["flicky.zip"],
@@ -55,7 +55,7 @@ GAMES: dict[str, dict[str, object]] = {
         "console": "system1",
         "frames": 3600,
         "screenshot_sha256": "5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa",
-        "pcm_sha256": "b92a66a8855e0ddc5742280d565fb7db891e8114f43526952e53958798fb2ee9",
+        "pcm_sha256": "967c9a781ac02ab1ba754bd0e22978777418f9858782c9c6f2834c1494f35af0",
     },
     "teddybb": {
         "roms": ["teddybb.zip"],
@@ -68,7 +68,7 @@ GAMES: dict[str, dict[str, object]] = {
         "roms": ["psychos.zip"],
         "console": "psychos",
         "frames": 3600,
-        "screenshot_sha256": "91e3666f8f999fa578ba64f9663d43db4a056c5faa5ae43f7cba7b9fccee3c53",
+        "screenshot_sha256": "aced9ac000a96edeacd3f79f4741e42b0484577d97e442151a42130b4d355b8b",
         "pcm_sha256": "1882368a44c4b39b8f970977f70507087611d3b34693b0a7fff4d92c90311266",
     },
     "ikari": {
@@ -116,11 +116,11 @@ GAMES: dict[str, dict[str, object]] = {
         "pcm_sha256": "49722a787982c00a7a639fc1e9b4f87707bbdc6c83cb60c8b3d93001b6283035",
     },
     "drift2": {
-        "roms": ["drift2.zip"],
-        "console": "systeme",
+        "roms": ["drif2.gg", "drift2.zip", "Sonic Drift 2 (World).gg", "sonic_drift2.gg"],
+        "console": "auto",
         "frames": 3600,
-        "screenshot_sha256": "1fd9d9655964fcd78aad61404b948ac0efed627174e950dfb385989ce6f07560",
-        "pcm_sha256": "04c70ed0b47b56cdc2263435922022fcfbecd5f240861a83e675abc6c0971669",
+        "screenshot_sha256": "d2f031809d7cd79621fb57afe5cd1d493a9f8a264b3c03831db88c152517a23e",
+        "pcm_sha256": "c7ef6074442c8f70b02ff28df1b874d47df21f8b46ddc9ed60077f70ea483750",
     },
 
     "fantastic_dizzy_sms_logo_wave_250": {

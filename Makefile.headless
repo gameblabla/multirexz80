@@ -183,6 +183,13 @@ ARCADE_REGRESSION_OUT_DIR ?= test-results/arcade_regression
 test-arcade-regression: $(PRGNAME)
 	python3 source/tests/headless_regression.py --no-build --binary ./$(PRGNAME) --rom-dir $(ARCADE_REGRESSION_ROM_DIR) --out-dir $(ARCADE_REGRESSION_OUT_DIR) --games blockgal blockgalb choplift flicky gardia teddybb tetrisse transfrm drift2 psychos ikari athena
 
+PSYCHOS_SPRITE_ROM ?= roms/psychos.zip
+PSYCHOS_SPRITE_OUT_DIR ?= test-results/psychos_sprite
+PSYCHOS_SPRITE_MAME_VIDEO ?=
+
+test-psychos-sprite: $(PRGNAME)
+	python3 source/tests/psychos_sprite_regression.py --binary ./$(PRGNAME) --rom "$(PSYCHOS_SPRITE_ROM)" --out-dir $(PSYCHOS_SPRITE_OUT_DIR) $(if $(PSYCHOS_SPRITE_MAME_VIDEO),--mame-video "$(PSYCHOS_SPRITE_MAME_VIDEO)",)
+
 IKARI_TITLE_ROM ?= roms/ikari.zip
 IKARI_TITLE_OUT_DIR ?= test-results/ikari_title
 IKARI_TITLE_FRAMES ?= 593
@@ -200,6 +207,12 @@ test-athena-attract: $(PRGNAME)
 	python3 source/tests/athena_attract_regression.py --binary ./$(PRGNAME) --rom "$(ATHENA_ATTRACT_ROM)" --out-dir $(ATHENA_ATTRACT_OUT_DIR) --frames $(ATHENA_ATTRACT_FRAMES) $(if $(ATHENA_ATTRACT_MAME_VIDEO),--mame-video "$(ATHENA_ATTRACT_MAME_VIDEO)" --mame-frame $(ATHENA_ATTRACT_MAME_FRAME),)
 
 FLICKY_GAMEPLAY_ROM ?= roms/flicky.zip
+CHOPLIFT_BOOT_ROM ?= roms/choplift.zip
+CHOPLIFT_BOOT_OUT_DIR ?= test-results/choplift_boot
+
+test-choplift-boot: $(PRGNAME)
+	python3 source/tests/choplift_boot_regression.py --binary ./$(PRGNAME) --rom $(CHOPLIFT_BOOT_ROM) --out-dir $(CHOPLIFT_BOOT_OUT_DIR) --quiet
+
 FLICKY_GAMEPLAY_OUT_DIR ?= test-results/flicky_gameplay
 FLICKY_GAMEPLAY_FRAMES ?= 1440
 FLICKY_GAMEPLAY_MAME_VIDEO ?=
@@ -279,6 +292,15 @@ COLECO_MULTI_SPRITES_FRAMES ?= 120
 test-coleco-multi-sprites: $(PRGNAME)
 	python3 source/tests/coleco_multi_sprites_regression.py --binary ./$(PRGNAME) --rom "$(COLECO_MULTI_SPRITES_ROM)" --bios "$(COLECO_MULTI_SPRITES_BIOS)" --out-dir $(COLECO_MULTI_SPRITES_OUT_DIR) --frames $(COLECO_MULTI_SPRITES_FRAMES)
 
+ROM_BUNDLE_SMOKE_ROM_DIR ?= roms
+ROM_BUNDLE_SMOKE_OUT_DIR ?= test-results/rom_bundle_smoke
+ROM_BUNDLE_SMOKE_FRAMES ?= 3600
+ROM_BUNDLE_SMOKE_TIMEOUT ?= 90
+
+test-rom-bundle-smoke: $(PRGNAME)
+	python3 source/tests/rom_bundle_smoke_regression.py --binary ./$(PRGNAME) --rom-dir "$(ROM_BUNDLE_SMOKE_ROM_DIR)" --out-dir "$(ROM_BUNDLE_SMOKE_OUT_DIR)" --frames $(ROM_BUNDLE_SMOKE_FRAMES) --timeout $(ROM_BUNDLE_SMOKE_TIMEOUT)
+
+
 
 TEST_ALL_ROM_DIR ?= roms
 TEST_ALL_OUT_DIR ?= test-results/all
@@ -287,7 +309,7 @@ TEST_ALL_JOBS ?= 1
 TEST_ALL_COLECO_BIOS ?=
 TEST_ALL_TARGETS ?=
 
-.PHONY: test-all
+.PHONY: test-all test-rom-bundle-smoke
 
 test-all: $(PRGNAME)
 	python3 source/tests/run_all_headless_tests.py --root . --makefile Makefile.headless --rom-dir "$(TEST_ALL_ROM_DIR)" --out-dir "$(TEST_ALL_OUT_DIR)" --timeout $(TEST_ALL_TIMEOUT) $(if $(TEST_ALL_COLECO_BIOS),--coleco-bios "$(TEST_ALL_COLECO_BIOS)",) --jobs $(TEST_ALL_JOBS) $(if $(TEST_ALL_TARGETS),--targets $(TEST_ALL_TARGETS),)

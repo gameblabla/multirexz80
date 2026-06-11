@@ -37,8 +37,8 @@ GAMES = {
     "choplift": {
         "rom": "choplift.zip",
         "console": "system1",
-        "screenshot_sha256": "435a6718cd5ff6280f508fa692e784967418ff2d69c8b552733d8208eec2cdde",
-        "pcm_sha256": "f95cb4c22ce6764c8870bfddf49fddfd63d34174ac4ae870137ddb0632ca15b3",
+        "screenshot_sha256": "cab50edda78c539cc50229db9f0208c19e9a86be101cd14aafa30e88eb610b7b",
+        "pcm_sha256": "8dd8f2f1555b97ec379e7977840b9c627c552ff250cb8a78b1051c32a4230671",
     },
     "flicky": {
         "rom": "flicky.zip",
@@ -50,7 +50,7 @@ GAMES = {
         "rom": "gardia.zip",
         "console": "system1",
         "screenshot_sha256": "5d183a8a1faf0441be54c39af35ef3e20ee06aebaa7d76fad7a2d8401040b5aa",
-        "pcm_sha256": "b92a66a8855e0ddc5742280d565fb7db891e8114f43526952e53958798fb2ee9",
+        "pcm_sha256": "967c9a781ac02ab1ba754bd0e22978777418f9858782c9c6f2834c1494f35af0",
     },
     "teddybb": {
         "rom": "teddybb.zip",

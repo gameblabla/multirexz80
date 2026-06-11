@@ -34,12 +34,14 @@
 #define SNK_TX_SIZE        0x8000u
 #define SNK_BG_SIZE        0x50000u
 #define SNK_SP16_SIZE      0x40000u
+#define SNK_PSYCHOS_SP16_SIZE 0x20000u
 #define SNK_SP32_SIZE      0x80000u
 #define SNK_YM2_SIZE       0x40000u
 
 #define SNK_TX_ELEMENTS     (SNK_TX_SIZE / 32u)
 #define SNK_BG_ELEMENTS     (SNK_BG_SIZE / 128u)
 #define SNK_SP16_ELEMENTS   ((SNK_SP16_SIZE >> 2) / 32u)
+#define SNK_PSYCHOS_SP16_ELEMENTS ((SNK_PSYCHOS_SP16_SIZE >> 2) / 32u)
 #define SNK_SP32_ELEMENTS   ((SNK_SP32_SIZE >> 2) / 128u)
 #define SNK_SP16_3B_ELEMENTS ((SNK_SP16_SIZE / 3u) / 32u)
 #define SNK_SP32_3B_ELEMENTS ((SNK_SP32_SIZE / 3u) / 128u)
@@ -1536,7 +1538,14 @@ void snk_psychos_writemem(uint16_t address, uint8_t data)
             case 0xc840: snk.bg_scrollx = (snk.bg_scrollx & 0xff00) | data; return;
             case 0xc880:
                 snk.video_attr = data;
-                if (snk.game_type == SNK_GAME_GWAR || snk.game_type == SNK_GAME_CHOPPER)
+                /* GWAR-class hardware, including Psycho Soldier, drives the
+                 * sprite scroll MSBs from the video-attributes latch.  MAME's
+                 * bermudat_state::gwar_videoattrs_w applies these bits for
+                 * Psycho Soldier as well; leaving PSYCHOS out wraps the 16x16
+                 * and 32x32 sprite coordinate spaces at 256 pixels, producing
+                 * misplaced/incorrect-looking objects such as the title Y and
+                 * in-game energy orbs. */
+                if (snk.game_type == SNK_GAME_PSYCHOS || snk.game_type == SNK_GAME_GWAR || snk.game_type == SNK_GAME_CHOPPER)
                 {
                     snk.sp32_scrollx = (snk.sp32_scrollx & 0x00ff) | ((uint16_t)(data & 0x80) << 1);
                     snk.sp16_scrollx = (snk.sp16_scrollx & 0x00ff) | ((uint16_t)(data & 0x40) << 2);
@@ -1761,7 +1770,18 @@ static void snk_decode_gfx(void)
     }
     else
     {
-        snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_SP16_SIZE, SNK_SP16_ELEMENTS, 16);
+        if (snk.game_type == SNK_GAME_PSYCHOS)
+        {
+            /* Psycho Soldier only has 0x20000 bytes of 16x16 sprite ROMs.
+             * MAME still receives banked 16x16 sprite codes above that range
+             * and wraps them through the decoded gfx element count.  Decoding
+             * this region as the larger GWAR/Chopper 0x40000 layout uses the
+             * wrong plane stride and reads the empty 0xff-filled half of the
+             * allocation, causing sparse/incorrect 16x16 sprites. */
+            snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_PSYCHOS_SP16_SIZE, SNK_PSYCHOS_SP16_ELEMENTS, 16);
+        }
+        else
+            snk_decode_sprite4(snk.sp16_dec, snk.sp16_rom, SNK_SP16_SIZE, SNK_SP16_ELEMENTS, 16);
         snk_decode_sprite4(snk.sp32_dec, snk.sp32_rom, SNK_SP32_SIZE, SNK_SP32_ELEMENTS, 32);
     }
     snk.gfx_decoded = 1;
@@ -1789,6 +1809,8 @@ static inline const uint8_t *sp16_tile_pixels(uint16_t code)
         else
             code %= SNK_SP16_3B_ELEMENTS;
     }
+    else if (snk.game_type == SNK_GAME_PSYCHOS)
+        code %= SNK_PSYCHOS_SP16_ELEMENTS;
     else
         code %= SNK_SP16_ELEMENTS;
     return snk.sp16_dec + ((size_t)code << 8);
