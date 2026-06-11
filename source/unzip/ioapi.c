@@ -39,6 +39,13 @@
 
 #include "ioapi.h"
 
+#if defined(_WIN32) || defined(WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 voidpf call_zopen64 (const zlib_filefunc64_32_def* pfilefunc,const void*filename,int mode)
 {
     if (pfilefunc->zfile_func64.zopen64_file != NULL)
@@ -232,9 +239,189 @@ static int ZCALLBACK ferror_file_func (voidpf opaque, voidpf stream)
     return ret;
 }
 
+
+#if defined(_WIN32) || defined(WIN32)
+/*
+ * The generic MiniZip stdio64 callbacks are fragile on Win32/Win64 MinGW:
+ * they route unzOpen() through fopen64/fseeko64/ftello64 aliases whose exact
+ * ABI varies between CRTs.  When the seek/tell callback misreports position,
+ * the ZIP central-directory search or deflate read can spin inside a UI thread
+ * load, making the Win32 frontend look like it entered an endless menu/repaint
+ * loop.  The emulator only needs normal local ROM archives, so use native
+ * Win32 file handles for ZIP I/O and keep all offsets explicit 64-bit values.
+ */
+typedef struct win32_zip_file_s
+{
+    HANDLE handle;
+    DWORD last_error;
+} win32_zip_file_t;
+
+static voidpf ZCALLBACK win32_open_file_func(voidpf opaque, const char* filename, int mode)
+{
+    win32_zip_file_t *wf;
+    DWORD access = 0;
+    DWORD creation = OPEN_EXISTING;
+    (void)opaque;
+
+    if (!filename)
+        return NULL;
+
+    if ((mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER) == ZLIB_FILEFUNC_MODE_READ)
+        access |= GENERIC_READ;
+    if (mode & ZLIB_FILEFUNC_MODE_WRITE)
+        access |= GENERIC_WRITE;
+    if (mode & ZLIB_FILEFUNC_MODE_EXISTING)
+        creation = OPEN_EXISTING;
+    if (mode & ZLIB_FILEFUNC_MODE_CREATE)
+        creation = CREATE_ALWAYS;
+
+    if (!access)
+        return NULL;
+
+    wf = (win32_zip_file_t *)malloc(sizeof(*wf));
+    if (!wf)
+        return NULL;
+    wf->last_error = ERROR_SUCCESS;
+    wf->handle = CreateFileA(filename, access, FILE_SHARE_READ, NULL, creation,
+                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS, NULL);
+    if (wf->handle == INVALID_HANDLE_VALUE)
+    {
+        wf->last_error = GetLastError();
+        free(wf);
+        return NULL;
+    }
+    return wf;
+}
+
+static voidpf ZCALLBACK win32_open64_file_func(voidpf opaque, const void* filename, int mode)
+{
+    return win32_open_file_func(opaque, (const char *)filename, mode);
+}
+
+static uLong ZCALLBACK win32_read_file_func(voidpf opaque, voidpf stream, void* buf, uLong size)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    DWORD want;
+    DWORD got = 0;
+    (void)opaque;
+    if (!wf || wf->handle == INVALID_HANDLE_VALUE || !buf)
+        return 0;
+    while (size > 0)
+    {
+        want = size > 0x40000000UL ? 0x40000000UL : (DWORD)size;
+        if (!ReadFile(wf->handle, buf, want, &got, NULL))
+        {
+            wf->last_error = GetLastError();
+            return 0;
+        }
+        return (uLong)got;
+    }
+    return 0;
+}
+
+static uLong ZCALLBACK win32_write_file_func(voidpf opaque, voidpf stream, const void* buf, uLong size)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    DWORD want;
+    DWORD done = 0;
+    (void)opaque;
+    if (!wf || wf->handle == INVALID_HANDLE_VALUE || !buf)
+        return 0;
+    want = size > 0x40000000UL ? 0x40000000UL : (DWORD)size;
+    if (!WriteFile(wf->handle, buf, want, &done, NULL))
+    {
+        wf->last_error = GetLastError();
+        return 0;
+    }
+    return (uLong)done;
+}
+
+static ZPOS64_T ZCALLBACK win32_tell64_file_func(voidpf opaque, voidpf stream)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    LARGE_INTEGER zero;
+    LARGE_INTEGER pos;
+    (void)opaque;
+    if (!wf || wf->handle == INVALID_HANDLE_VALUE)
+        return (ZPOS64_T)-1;
+    zero.QuadPart = 0;
+    if (!SetFilePointerEx(wf->handle, zero, &pos, FILE_CURRENT))
+    {
+        wf->last_error = GetLastError();
+        return (ZPOS64_T)-1;
+    }
+    return (ZPOS64_T)pos.QuadPart;
+}
+
+static long ZCALLBACK win32_tell_file_func(voidpf opaque, voidpf stream)
+{
+    ZPOS64_T pos = win32_tell64_file_func(opaque, stream);
+    if (pos > 0x7fffffffULL)
+        return -1;
+    return (long)pos;
+}
+
+static long ZCALLBACK win32_seek64_file_func(voidpf opaque, voidpf stream, ZPOS64_T offset, int origin)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    LARGE_INTEGER dist;
+    DWORD move_method;
+    (void)opaque;
+    if (!wf || wf->handle == INVALID_HANDLE_VALUE)
+        return -1;
+    switch (origin)
+    {
+    case ZLIB_FILEFUNC_SEEK_CUR: move_method = FILE_CURRENT; break;
+    case ZLIB_FILEFUNC_SEEK_END: move_method = FILE_END; break;
+    case ZLIB_FILEFUNC_SEEK_SET: move_method = FILE_BEGIN; break;
+    default: return -1;
+    }
+    dist.QuadPart = (LONGLONG)offset;
+    if (!SetFilePointerEx(wf->handle, dist, NULL, move_method))
+    {
+        wf->last_error = GetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+static long ZCALLBACK win32_seek_file_func(voidpf opaque, voidpf stream, uLong offset, int origin)
+{
+    return win32_seek64_file_func(opaque, stream, (ZPOS64_T)offset, origin);
+}
+
+static int ZCALLBACK win32_close_file_func(voidpf opaque, voidpf stream)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    int ok;
+    (void)opaque;
+    if (!wf)
+        return EOF;
+    ok = (wf->handle != INVALID_HANDLE_VALUE) ? CloseHandle(wf->handle) : 1;
+    free(wf);
+    return ok ? 0 : EOF;
+}
+
+static int ZCALLBACK win32_error_file_func(voidpf opaque, voidpf stream)
+{
+    win32_zip_file_t *wf = (win32_zip_file_t *)stream;
+    (void)opaque;
+    return (wf && wf->last_error != ERROR_SUCCESS) ? 1 : 0;
+}
+#endif
+
 void fill_fopen_filefunc (pzlib_filefunc_def)
   zlib_filefunc_def* pzlib_filefunc_def;
 {
+#if defined(_WIN32) || defined(WIN32)
+    pzlib_filefunc_def->zopen_file = win32_open_file_func;
+    pzlib_filefunc_def->zread_file = win32_read_file_func;
+    pzlib_filefunc_def->zwrite_file = win32_write_file_func;
+    pzlib_filefunc_def->ztell_file = win32_tell_file_func;
+    pzlib_filefunc_def->zseek_file = win32_seek_file_func;
+    pzlib_filefunc_def->zclose_file = win32_close_file_func;
+    pzlib_filefunc_def->zerror_file = win32_error_file_func;
+#else
     pzlib_filefunc_def->zopen_file = fopen_file_func;
     pzlib_filefunc_def->zread_file = fread_file_func;
     pzlib_filefunc_def->zwrite_file = fwrite_file_func;
@@ -242,11 +429,21 @@ void fill_fopen_filefunc (pzlib_filefunc_def)
     pzlib_filefunc_def->zseek_file = fseek_file_func;
     pzlib_filefunc_def->zclose_file = fclose_file_func;
     pzlib_filefunc_def->zerror_file = ferror_file_func;
+#endif
     pzlib_filefunc_def->opaque = NULL;
 }
 
 void fill_fopen64_filefunc (zlib_filefunc64_def*  pzlib_filefunc_def)
 {
+#if defined(_WIN32) || defined(WIN32)
+    pzlib_filefunc_def->zopen64_file = win32_open64_file_func;
+    pzlib_filefunc_def->zread_file = win32_read_file_func;
+    pzlib_filefunc_def->zwrite_file = win32_write_file_func;
+    pzlib_filefunc_def->ztell64_file = win32_tell64_file_func;
+    pzlib_filefunc_def->zseek64_file = win32_seek64_file_func;
+    pzlib_filefunc_def->zclose_file = win32_close_file_func;
+    pzlib_filefunc_def->zerror_file = win32_error_file_func;
+#else
     pzlib_filefunc_def->zopen64_file = fopen64_file_func;
     pzlib_filefunc_def->zread_file = fread_file_func;
     pzlib_filefunc_def->zwrite_file = fwrite_file_func;
@@ -254,5 +451,6 @@ void fill_fopen64_filefunc (zlib_filefunc64_def*  pzlib_filefunc_def)
     pzlib_filefunc_def->zseek64_file = fseek64_file_func;
     pzlib_filefunc_def->zclose_file = fclose_file_func;
     pzlib_filefunc_def->zerror_file = ferror_file_func;
+#endif
     pzlib_filefunc_def->opaque = NULL;
 }

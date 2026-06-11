@@ -16,6 +16,8 @@
 
 /* Function prototypes */
 uint8_t *loadFromZipByName(char *archive, char *filename, uint32_t *filesize);
+int32_t loadZipMemberExact(const char *archive, const char *name, uint8_t *dst, uint32_t expected_size, uint32_t expected_crc);
+int32_t zip_member_exists_in_archive(const char *archive, const char *name);
 int32_t check_zip(const char *filename);
 //int gzsize(gzFile *gd);
 

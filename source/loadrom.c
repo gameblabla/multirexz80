@@ -520,6 +520,22 @@ static const char *zip_basename(const char *name)
     return base;
 }
 
+
+static int zip_path_stem_ieq(const char *path, const char *stem)
+{
+    const char *base;
+    char tmp[128];
+    size_t n;
+    if (!path || !stem) return 0;
+    base = zip_basename(path);
+    n = strlen(base);
+    if (n >= sizeof(tmp)) n = sizeof(tmp) - 1;
+    memcpy(tmp, base, n);
+    tmp[n] = '\0';
+    { char *dot = strrchr(tmp, '.'); if (dot) *dot = '\0'; }
+    return !strcasecmp(tmp, stem);
+}
+
 static int locate_zip_member_by_name_or_basename(unzFile zhandle, const char *name, char *actual_name, uint32_t actual_name_size, unz_file_info *zinfo)
 {
     int32_t zerror;
@@ -546,11 +562,16 @@ static int locate_zip_member_by_name_or_basename(unzFile zhandle, const char *na
     return 0;
 }
 
+static const char *zip_member_load_path = NULL;
+
 static int load_zip_member_exact(unzFile zhandle, const char *name, uint8_t *dst, uint32_t expected_size, uint32_t expected_crc)
 {
     char zip_name[PATH_MAX];
     unz_file_info zinfo;
     int32_t zerror;
+
+    if (zip_member_load_path)
+        return loadZipMemberExact(zip_member_load_path, name, dst, expected_size, expected_crc);
 
     memset(&zinfo, 0, sizeof(zinfo));
     if (!locate_zip_member_by_name_or_basename(zhandle, name, zip_name, sizeof(zip_name), &zinfo))
@@ -629,20 +650,16 @@ static int load_zip_member_to_system1_main(unzFile zhandle, const system1_zip_fi
 
 static int load_zip_member_to_system1_from_zip(const char *zip_path, const char *name, int region, uint32_t offset, uint32_t size, uint32_t crc)
 {
-    unzFile zh;
     uint8_t *tmp;
     int ok = 0;
     if (!zip_path) return 0;
-    zh = unzOpen(zip_path);
-    if (!zh) return 0;
     tmp = (uint8_t *)malloc(size);
     if (tmp)
     {
-        if (load_zip_member_exact(zh, name, tmp, size, crc))
+        if (loadZipMemberExact(zip_path, name, tmp, size, crc))
             ok = system1_set_region(region, offset, tmp, size);
         free(tmp);
     }
-    unzClose(zh);
     return ok;
 }
 
@@ -705,7 +722,7 @@ static int system1_postload_blockgal_mc8123(unzFile zhandle, uint8_t *main_regio
     uint8_t key[0x2000];
     int have_key = 0;
 
-    if (!zhandle || !main_region || main_size < 0x8000u)
+    if (!main_region || main_size < 0x8000u)
         return 0;
 
     /* Block Gal parent uses Sega/NEC MC-8123B key 317-0029.  Decode once at
@@ -877,7 +894,7 @@ static int system1_postload_ufosensi_mc8123(unzFile zhandle, uint8_t *main_regio
     uint8_t *opcodes;
     uint8_t key[0x2000];
     int ok;
-    if (!zhandle || !main_region || main_size < 0x8000u)
+    if (!main_region || main_size < 0x8000u)
         return 0;
     ok = load_zip_member_exact(zhandle, "317-0064.key", key, 0x2000, 0xda326f36);
     if (!ok)
@@ -897,7 +914,7 @@ static int system1_postload_wbml_mc8123(unzFile zhandle, uint8_t *main_region, u
     uint8_t key[0x2000];
     int ok;
 
-    if (!zhandle || !main_region || main_size < 0x20000u)
+    if (!main_region || main_size < 0x20000u)
         return 0;
 
     /* Wonder Boy: Monster Land uses an MC-8123 encrypted main Z80
@@ -1446,7 +1463,10 @@ static int system1_zip_contains_known_name(const char *filename)
 
 static int zip_member_exists(unzFile zhandle, const char *name)
 {
-    if (!zhandle || !name) return 0;
+    if (!name) return 0;
+    if (zip_member_load_path)
+        return zip_member_exists_in_archive(zip_member_load_path, name);
+    if (!zhandle) return 0;
     if (unzLocateFile(zhandle, name, 0) == UNZ_OK)
         return 1;
     return 0;
@@ -1469,26 +1489,27 @@ static int system1_should_skip_bootleg_clone(unzFile zhandle, const system1_zip_
 
 static int load_system1_zip_set(const char *filename, const system1_zip_set_t *set)
 {
-    unzFile zhandle;
+    unzFile zhandle = (unzFile)1;
     uint8_t *region;
     int ok = 1;
     int i;
 
-    system1_current_zip_path = filename;
-    zhandle = unzOpen(filename);
-    if (!zhandle || !set)
+    if (!filename || !set)
         return 0;
+
+    system1_current_zip_path = filename;
+    zip_member_load_path = filename;
 
     if (system1_should_skip_bootleg_clone(zhandle, set))
     {
-        unzClose(zhandle);
+        zip_member_load_path = NULL;
         return 0;
     }
 
     region = (uint8_t *)malloc(set->main_size);
     if (!region)
     {
-        unzClose(zhandle);
+        zip_member_load_path = NULL;
         return 0;
     }
     memset(region, 0xff, set->main_size);
@@ -1507,7 +1528,7 @@ static int load_system1_zip_set(const char *filename, const system1_zip_set_t *s
     if (ok && set->postload)
         ok = set->postload(zhandle, region, set->main_size);
 
-    unzClose(zhandle);
+    zip_member_load_path = NULL;
     if (!ok)
     {
         free(region);
@@ -1525,11 +1546,17 @@ static int load_system1_zip_set(const char *filename, const system1_zip_set_t *s
 static int load_system1_zip(const char *filename)
 {
     const system1_zip_set_t *set;
+
+    /* MAME-style archive sets are named after the shortname.  Do not brute-force
+     * every supported System 1 set from UI/frontends: on Windows this can make
+     * opening unrelated arcade ZIPs look like a hang while the same archive is
+     * repeatedly opened and scanned. */
     for (set = system1_sets; set->set_name; set++)
     {
-        if (load_system1_zip_set(filename, set))
-            return 1;
+        if (zip_path_stem_ieq(filename, set->set_name))
+            return load_system1_zip_set(filename, set);
     }
+
     if (system1_zip_contains_known_name(filename))
     {
         fprintf(stderr, "Sega System 1/System 2 set is known but not yet supported by this build: %s\n", filename);
@@ -1800,28 +1827,27 @@ static int load_zip_member_to_snk(unzFile zhandle, const system1_zip_file_t *fil
 
 static int load_snk_psychos_zip(const char *filename)
 {
-    unzFile zhandle;
+    unzFile zhandle = (unzFile)1;
     uint8_t *region;
     int i, ok;
     const snk_zip_set_t *set;
     const char *base = strrchr(filename, '/');
     base = base ? base + 1 : filename;
 
+    (void)base;
     for (set = snk_zip_sets; set->set_name; set++)
     {
-        size_t n = strlen(set->set_name);
-        if (!strncasecmp(base, set->set_name, n))
+        if (zip_path_stem_ieq(filename, set->set_name))
             break;
     }
     if (!set->set_name)
         return 0;
 
-    zhandle = unzOpen(filename);
-    if (!zhandle) return 0;
+    zip_member_load_path = filename;
     region = (uint8_t *)malloc(0x10000);
     if (!region)
     {
-        unzClose(zhandle);
+        zip_member_load_path = NULL;
         return 0;
     }
     memset(region, 0xff, 0x10000);
@@ -1832,7 +1858,7 @@ static int load_snk_psychos_zip(const char *filename)
         ok = load_zip_member_to_snk(zhandle, &set->files[i], region);
         if (!ok) break;
     }
-    unzClose(zhandle);
+    zip_member_load_path = NULL;
     if (!ok)
     {
         free(region);
@@ -1864,35 +1890,38 @@ static int load_systeme_zip_set(unzFile zhandle, const systeme_zip_game_t *game,
 
 static int load_systeme_zip(const char *filename)
 {
-    uint8_t *region;
-    unzFile zhandle;
+    uint8_t *region = NULL;
+    unzFile zhandle = (unzFile)1;
     const systeme_zip_game_t *match = NULL;
     size_t i;
 
-    zhandle = unzOpen(filename);
-    if (!zhandle)
-        return 0;
-
     for (i = 0; i < sizeof(systeme_zip_games) / sizeof(systeme_zip_games[0]); i++)
     {
-        const systeme_zip_game_t *game = &systeme_zip_games[i];
-        region = malloc(game->region_size);
-        if (!region)
+        if (zip_path_stem_ieq(filename, systeme_zip_games[i].setname))
         {
-            unzClose(zhandle);
-            return 0;
-        }
-
-        if (load_systeme_zip_set(zhandle, game, region))
-        {
-            match = game;
+            match = &systeme_zip_games[i];
             break;
         }
-        free(region);
-        region = NULL;
+    }
+    if (!match)
+        return 0;
+
+    zip_member_load_path = filename;
+    region = malloc(match->region_size);
+    if (!region)
+    {
+        zip_member_load_path = NULL;
+        return 0;
     }
 
-    unzClose(zhandle);
+    if (!load_systeme_zip_set(zhandle, match, region))
+    {
+        free(region);
+        region = NULL;
+        match = NULL;
+    }
+
+    zip_member_load_path = NULL;
 
     if (!match || !region)
         return 0;
@@ -2158,16 +2187,30 @@ uint32_t load_rom (char *filename)
 	if(check_zip(filename))
 	{
 		char name[PATH_MAX];
+		uint8_t *zip_rom = NULL;
+		uint32_t zip_size = 0;
 		int loaded_arcade_zip = 0;
 #if MULTIREXZ80_ENABLE_ARCADE
 		loaded_arcade_zip = load_system1_zip(filename) || load_systeme_zip(filename) || load_snk_psychos_zip(filename);
 #endif
-		if (!loaded_arcade_zip)
+		if (loaded_arcade_zip)
 		{
-			cart.rom = loadFromZipByName((char*)filename, name, &cart.size);
-			if (!cart.rom)
-				return 0;
+			cart.pages = cart.size / 0x4000;
+			if (!cart.crc && cart.rom && cart.size)
+				cart.crc = crc32(0, cart.rom, cart.size);
+			cart.loaded = 1;
+			set_config();
+			return 1;
 		}
+
+		zip_rom = loadFromZipByName((char*)filename, name, &zip_size);
+		if (!zip_rom)
+			return 0;
+		if (name[0])
+			snprintf(option.game_name, sizeof(option.game_name), "%s", name);
+		loaded_arcade_zip = load_rom_buffer(zip_rom, zip_size);
+		free(zip_rom);
+		return loaded_arcade_zip;
 	}
 	else
 #endif
