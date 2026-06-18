@@ -1229,13 +1229,20 @@ void snk_psychos_memory_map(int clear_ram)
 
 static uint8_t snk_in0(void)
 {
+    /* MAME IN0 for SNK games:
+     * bit0: sound_busy (CUSTOM, active-high)
+     * bit1: SERVICE1 (service coin) - Ikari/Athena/Chopper; UNKNOWN for Psychos
+     * bit2: TILT for Victroad/Psychos/Chopper; UNKNOWN for Ikari/Athena
+     * bit3: SERVICE (menu) for Chopper; UNKNOWN for others
+     * bit4: COIN2, bit5: COIN1, bit6: START2, bit7: START1 */
     uint8_t r = (snk.sound_status & 0x04) ? 0x01 : 0x00;
     r |= 0xfe;
+    if (input.arcade & INPUT_ARCADE_SERVICE) r &= (uint8_t)~0x02;
+    if (input.arcade & INPUT_ARCADE_TEST)    r &= (uint8_t)~0x04; /* tilt */
     if (input.arcade & INPUT_ARCADE_COIN2)  r &= (uint8_t)~0x10;
     if (input.arcade & INPUT_ARCADE_COIN1)  r &= (uint8_t)~0x20;
     if (input.arcade & INPUT_ARCADE_START2) r &= (uint8_t)~0x40;
     if (input.arcade & INPUT_ARCADE_START1) r &= (uint8_t)~0x80;
-    if (input.arcade & INPUT_ARCADE_TEST)   r &= (uint8_t)~0x04;
     return r;
 }
 

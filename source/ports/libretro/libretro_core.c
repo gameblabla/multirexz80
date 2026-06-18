@@ -357,6 +357,15 @@ static void poll_arcade(int port)
     if (m & (1 << RETRO_DEVICE_ID_JOYPAD_L2))    *pad |= INPUT_ROTATE_LEFT;
     if (m & (1 << RETRO_DEVICE_ID_JOYPAD_R2))    *pad |= INPUT_ROTATE_RIGHT;
 
+    /* System 1 dial (blockgal): map analog stick X to the dial value.
+     * The core's system1_update_dial_from_dpad() also drives it from dpad. */
+    if (sms.console == CONSOLE_SYSTEM1 && system1_uses_dial())
+    {
+        int16_t ax = input_state_cb(port, RETRO_DEVICE_ANALOG, 0, RETRO_DEVICE_ID_ANALOG_X);
+        if (ax != 0)
+            input.analog[port & 1][0] = (uint8_t)((ax + 0x8000) >> 8);
+    }
+
     /* Arcade cabinet controls: map P1 and P2 start/select to coin/start.
      * For 1P start: Start. For 1P coin: Select. For 2P coin: L2. For 2P start: R2.
      * Test/Service: handled through frontend hotkey + Start on P2 in some cores. */

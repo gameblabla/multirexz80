@@ -97,6 +97,7 @@ typedef struct
     uint8_t dip_b;
     uint8_t game;
     uint8_t uses_dial;
+    uint8_t button_swap; /* MAME: some games swap BUTTON1/BUTTON2 bit positions */
     uint8_t color_prom_present;
     uint8_t rotate;
 } system1_state_t;
@@ -219,7 +220,14 @@ static void system1_set_game_common(uint8_t game, uint8_t video_type, uint8_t ro
     s1.dip_a = dip_a;
     s1.dip_b = dip_b;
     s1.uses_dial = uses_dial;
+    s1.button_swap = 0;
     s1.main_cycles_per_line = SYSTEM1_CYCLES_PER_LINE;
+}
+
+static void system1_set_game_common_swapped(uint8_t game, uint8_t video_type, uint8_t rowscroll, uint8_t bank_mode, uint8_t pages, uint8_t rotate, uint8_t dip_a, uint8_t dip_b)
+{
+    system1_set_game_common(game, video_type, rowscroll, bank_mode, pages, rotate, dip_a, dip_b, 0);
+    s1.button_swap = 1;
 }
 
 void system1_set_game_blockgal(void)
@@ -260,12 +268,14 @@ void system1_set_game_brain(void)
 
 void system1_set_game_teddybb(void)
 {
-    system1_set_game_common(6, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff, 0);
+    /* MAME swaps BUTTON1/BUTTON2 vs the generic System 1 mapping. */
+    system1_set_game_common_swapped(6, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff);
 }
 
 void system1_set_game_wboy(void)
 {
-    system1_set_game_common(7, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff, 0);
+    /* MAME swaps BUTTON1/BUTTON2 vs the generic System 1 mapping. */
+    system1_set_game_common_swapped(7, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff);
 }
 
 void system1_set_game_wbml(void)
@@ -346,8 +356,9 @@ void system1_set_game_imsorry(void)
 
 void system1_set_game_myhero(void)
 {
-    /* System 1 PIO board, unencrypted parent. */
-    system1_set_game_common(19, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff, 0);
+    /* System 1 PIO board, unencrypted parent.
+     * MAME swaps BUTTON1/BUTTON2 vs the generic System 1 mapping. */
+    system1_set_game_common_swapped(19, 1, 0, SYSTEM1_BANK_FIXED, 2, SYSTEM1_ROTATE_NONE, 0xff, 0xff);
 }
 
 void system1_set_game_nob(void)
@@ -679,8 +690,17 @@ static uint8_t system1_player_r(int port)
     uint8_t p = input.pad[port & 1];
     if (s1.uses_dial)
         return (uint8_t)input.analog[port & 1][0];
-    if (p & INPUT_BUTTON2) r &= (uint8_t)~0x02;
-    if (p & INPUT_BUTTON1) r &= (uint8_t)~0x04;
+    if (s1.button_swap)
+    {
+        /* MAME: teddybb/wboy/myhero map BUTTON1→0x02, BUTTON2→0x04 */
+        if (p & INPUT_BUTTON1) r &= (uint8_t)~0x02;
+        if (p & INPUT_BUTTON2) r &= (uint8_t)~0x04;
+    }
+    else
+    {
+        if (p & INPUT_BUTTON2) r &= (uint8_t)~0x02;
+        if (p & INPUT_BUTTON1) r &= (uint8_t)~0x04;
+    }
     if (p & INPUT_DOWN)    r &= (uint8_t)~0x10;
     if (p & INPUT_UP)      r &= (uint8_t)~0x20;
     if (p & INPUT_RIGHT)   r &= (uint8_t)~0x40;
