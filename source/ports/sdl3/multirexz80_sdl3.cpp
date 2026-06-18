@@ -140,6 +140,9 @@ struct UiSettings
     bool db_lightgun = false;
     bool mouse_lightgun = true;
     bool show_lightgun_cursor = true;
+    bool force_graphicboard = false;
+    bool mouse_graphicboard = true;
+    bool show_graphicboard_cursor = true;
     int browser_index = 0;
     std::filesystem::path launch_cwd = std::filesystem::current_path();
     std::filesystem::path browser_dir = launch_cwd;
@@ -1614,6 +1617,7 @@ static bool load_game(AppState &app, const std::string &path)
     sdl3_clear_audio_queue(app);
     app.ui.db_lightgun = (sms.device[0] == DEVICE_LIGHTGUN);
     if (app.ui.force_lightgun) sms.device[0] = DEVICE_LIGHTGUN;
+    if (app.ui.force_graphicboard) { sms.device[0] = DEVICE_GRAPHICBOARD; sms.device[1] = DEVICE_GRAPHICBOARD; }
     app.rom_path = path;
     if (g_sram_path.empty())
     {
@@ -1884,6 +1888,89 @@ static void update_lightgun_mouse(AppState &app)
     window_point_to_lightgun(app, mx, my, (buttons & SDL_BUTTON_LMASK) != 0);
 }
 
+/* ---- Graphic Board v2 support ---- */
+
+static bool graphicboard_active()
+{
+    return sms.device[0] == DEVICE_GRAPHICBOARD || sms.device[1] == DEVICE_GRAPHICBOARD;
+}
+
+static int graphicboard_port()
+{
+    if (sms.device[0] == DEVICE_GRAPHICBOARD) return 0;
+    if (sms.device[1] == DEVICE_GRAPHICBOARD) return 1;
+    return 0;
+}
+
+static void window_point_to_graphicboard(AppState &app, float wx, float wy, bool btn1, bool btn2, bool btn3)
+{
+    if (!app.rom_loaded || !graphicboard_active()) return;
+    int win_w = 0, win_h = 0;
+    SDL_GetWindowSize(app.window, &win_w, &win_h);
+    int active_w = bitmap.viewport.w > 0 ? bitmap.viewport.w : 256;
+    int active_h = bitmap.viewport.h > 0 ? bitmap.viewport.h : vdp.height;
+    SDL_FRect dst = compute_dest_rect(app.ui, active_w, active_h, win_w, win_h);
+    if (dst.w <= 0.0f || dst.h <= 0.0f) return;
+
+    int port = graphicboard_port();
+    float nx, ny;
+    int x, y;
+
+    if (wx < dst.x || wy < dst.y || wx >= dst.x + dst.w || wy >= dst.y + dst.h)
+    {
+        /* Out of bounds - keep last position but update buttons */
+    }
+    else
+    {
+        nx = (wx - dst.x) / dst.w;
+        ny = (wy - dst.y) / dst.h;
+        x = static_cast<int>(nx * 255 + 0.5f);
+        y = static_cast<int>(ny * 255 + 0.5f);
+        if (x < 0) x = 0; if (x > 255) x = 255;
+        if (y < 0) y = 0; if (y > 255) y = 255;
+        /* Meka applies offsets: y += 32 + 4; x -= 4 */
+        x -= 4; if (x < 0) x = 0;
+        y += 36; if (y > 255) y = 255;
+        input.graphic_board[port].x = static_cast<uint8_t>(x);
+        input.graphic_board[port].y = static_cast<uint8_t>(y);
+    }
+
+    /* 3 buttons: bit0=start/pause, bit1=button1, bit2=button2 */
+    uint8_t btns = 0;
+    if (btn1) btns |= 0x02;  /* left mouse = button 1 */
+    if (btn2) btns |= 0x04;  /* right mouse = button 2 */
+    if (btn3) btns |= 0x01;  /* middle mouse = start */
+    input.graphic_board[port].buttons = btns;
+}
+
+static void update_graphicboard_mouse(AppState &app)
+{
+    if (!app.ui.mouse_graphicboard || !app.rom_loaded || !graphicboard_active()) return;
+    float mx = 0.0f, my = 0.0f;
+    uint32_t buttons = static_cast<uint32_t>(SDL_GetMouseState(&mx, &my));
+    window_point_to_graphicboard(app, mx, my,
+                                 (buttons & SDL_BUTTON_LMASK) != 0,
+                                 (buttons & SDL_BUTTON_RMASK) != 0,
+                                 (buttons & SDL_BUTTON_MMASK) != 0);
+}
+
+static void draw_graphicboard_cursor_overlay(AppState &app, const SDL_FRect &dst, int active_w, int active_h)
+{
+    if (!app.ui.show_graphicboard_cursor || !graphicboard_active()) return;
+    int port = graphicboard_port();
+    float x = dst.x + (static_cast<float>(input.graphic_board[port].x) / 255.0f) * dst.w;
+    float y = dst.y + (static_cast<float>(input.graphic_board[port].y) / 255.0f) * dst.h;
+    SDL_SetRenderDrawColor(app.renderer, 255, 255, 255, 200);
+    SDL_RenderLine(app.renderer, x - 6, y, x + 6, y);
+    SDL_RenderLine(app.renderer, x, y - 6, x, y + 6);
+    if (input.graphic_board[port].buttons & 0x02)
+    {
+        SDL_SetRenderDrawColor(app.renderer, 255, 100, 100, 200);
+        SDL_RenderLine(app.renderer, x - 4, y - 4, x + 4, y + 4);
+        SDL_RenderLine(app.renderer, x - 4, y + 4, x + 4, y - 4);
+    }
+}
+
 static void open_first_gamepad(AppState &app)
 {
     int count = 0;
@@ -2104,6 +2191,10 @@ static void parse_args(AppState &app, int argc, char **argv)
         else if (!std::strcmp(a, "--no-mouse-lightgun")) app.ui.mouse_lightgun = false;
         else if (!std::strcmp(a, "--lightgun-cursor")) { app.ui.show_lightgun_cursor = true; option.lightgun_cursor = 1; }
         else if (!std::strcmp(a, "--no-lightgun-cursor")) { app.ui.show_lightgun_cursor = false; option.lightgun_cursor = 0; }
+        else if (!std::strcmp(a, "--graphicboard")) app.ui.force_graphicboard = true;
+        else if (!std::strcmp(a, "--no-mouse-graphicboard")) app.ui.mouse_graphicboard = false;
+        else if (!std::strcmp(a, "--graphicboard-cursor")) app.ui.show_graphicboard_cursor = true;
+        else if (!std::strcmp(a, "--no-graphicboard-cursor")) app.ui.show_graphicboard_cursor = false;
         else if (!std::strcmp(a, "--hide-menu")) app.ui.show_menu = false;
         else if (a[0] != '-') app.rom_path = a;
     }
@@ -2195,7 +2286,10 @@ static void render_core(AppState &app)
     SDL_RenderClear(app.renderer);
     SDL_RenderTexture(app.renderer, app.texture, &src, &dst);
     if (app.rewind_preview_pixels.empty())
+    {
         draw_lightgun_cursor_overlay(app, dst, active_w, active_h);
+        draw_graphicboard_cursor_overlay(app, dst, active_w, active_h);
+    }
 }
 
 static bool browser_rom_extension_supported(const std::filesystem::path &path)
@@ -2379,6 +2473,30 @@ static void draw_controller_controls(AppState &app)
     ImGui::Text("Detected: %s  X:%d Y:%d Trigger:%s", lightgun_active() ? "yes" : "no",
                 input.analog[lightgun_port()][0], input.analog[lightgun_port()][1],
                 (input.pad[lightgun_port()] & INPUT_BUTTON1) ? "down" : "up");
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Graphic Board v2");
+    bool fgb = app.ui.force_graphicboard;
+    if (ImGui::Checkbox("Force Graphic Board on port 1", &fgb))
+    {
+        app.ui.force_graphicboard = fgb;
+        if (app.rom_loaded)
+        {
+            if (fgb) { sms.device[0] = DEVICE_GRAPHICBOARD; sms.device[1] = DEVICE_GRAPHICBOARD; }
+            else if (!app.ui.db_lightgun) { sms.device[0] = DEVICE_PAD2B; sms.device[1] = DEVICE_PAD2B; }
+        }
+    }
+    if (ImGui::Checkbox("Mouse controls Graphic Board", &app.ui.mouse_graphicboard)) {}
+    if (ImGui::Checkbox("Show Graphic Board cursor", &app.ui.show_graphicboard_cursor)) {}
+    if (graphicboard_active())
+    {
+        int gp = graphicboard_port();
+        ImGui::Text("Detected: yes  X:%d Y:%d Buttons:%02x",
+                    input.graphic_board[gp].x, input.graphic_board[gp].y,
+                    input.graphic_board[gp].buttons);
+    }
+    else
+        ImGui::Text("Detected: no");
 }
 
 static bool update_rewind_thumb_texture(AppState &app)
@@ -2939,6 +3057,7 @@ int main(int argc, char **argv)
             update_coleco_keypad_from_inputs(app);
             update_virtual_keyboard_gamepad(app);
             update_lightgun_mouse(app);
+            update_graphicboard_mouse(app);
             update_arcade_state_from_inputs(app);
         }
 

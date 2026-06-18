@@ -66,6 +66,7 @@ enum {
   DEVICE_PADDLE     = 2,  /* Paddle controller; rotary dial with fire button */
   DEVICE_LIGHTGUN   = 3,  /* Sega Light Phaser; Light Gun with trigger button */
   DEVICE_SPORTSPAD  = 4,  /* Sports Pad controller; analog stick with 2 buttons */
+  DEVICE_GRAPHICBOARD = 5, /* Sega Graphic Board v2 (SMS prototype); pen tablet */
 };
 
 /* Function prototypes */

@@ -472,4 +472,27 @@ void multirexz80_sdl12_frame_update(void)
         else if ((input.pad[0] & INPUT_RIGHT) && !(input.pad[0] & INPUT_LEFT))
             input.analog[0][0] = (input.analog[0][0] + DIAL_STEP) & 0xff;
     }
+
+    /* Graphic Board v2: virtual cursor moved by d-pad, button1/2 confirm.
+     * This provides a playable fallback on devices without a mouse. */
+    if (sms.device[0] == DEVICE_GRAPHICBOARD || sms.device[1] == DEVICE_GRAPHICBOARD)
+    {
+        int port = (sms.device[0] == DEVICE_GRAPHICBOARD) ? 0 : 1;
+        int x = input.graphic_board[port].x;
+        int y = input.graphic_board[port].y;
+        uint8_t btns = 0;
+        if (input.pad[port] & INPUT_LEFT)  x = (x - DIAL_STEP) & 0xff;
+        if (input.pad[port] & INPUT_RIGHT) x = (x + DIAL_STEP) & 0xff;
+        if (input.pad[port] & INPUT_UP)    y = (y - DIAL_STEP) & 0xff;
+        if (input.pad[port] & INPUT_DOWN)  y = (y + DIAL_STEP) & 0xff;
+        if (input.pad[port] & INPUT_BUTTON1) btns |= 0x02;
+        if (input.pad[port] & INPUT_BUTTON2) btns |= 0x04;
+        if (input.system & INPUT_START) btns |= 0x01;
+        /* Apply Meka's coordinate offsets */
+        x -= 4; if (x < 0) x = 0;
+        y += 36; if (y > 255) y = 255;
+        input.graphic_board[port].x = (uint8_t)x;
+        input.graphic_board[port].y = (uint8_t)y;
+        input.graphic_board[port].buttons = btns;
+    }
 }

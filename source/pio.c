@@ -127,6 +127,20 @@ void pio_reset(void)
   input.analog[1][0] = 128;
   input.analog[1][1] = 96;
 
+  /* Graphic Board v2 defaults */
+  {
+    int i;
+    for (i = 0; i < 2; i++)
+    {
+      input.graphic_board[i].x = 0;
+      input.graphic_board[i].y = 0;
+      input.graphic_board[i].buttons = 0;
+      input.graphic_board[i].read_index = 0;
+      input.graphic_board[i].port3f_old = 0;
+      input.graphic_board[i].unknown = 0xFE;
+    }
+  }
+
   /* SMS I/O power-on defaults */
   io_current = &io_lut[sms.territory][0xFF];
   pio_ctrl_w(0xFF);
@@ -146,6 +160,25 @@ void pio_ctrl_w(uint8_t data)
   /* save old TH values */
   th_level[0] = io_current->th_level[0];
   th_level[1] = io_current->th_level[1];
+  
+  /* Graphic Board v2: track read_index on port 0x3F transitions.
+   * Player 1 uses bits 4/5 (0x10/0x20), player 2 uses bits 6/7 (0x40/0x80).
+   * Bit 4 (P1) or 6 (P2) set resets read_index to 0.
+   * Bit 5 (P1) or 7 (P2) toggling increments read_index. */
+  {
+    int player;
+    for (player = 0; player < 2; player++)
+    {
+      uint8_t reset_mask = (player == 0) ? 0x10 : 0x40;
+      uint8_t toggle_mask = (player == 0) ? 0x20 : 0x80;
+      uint8_t old = input.graphic_board[player].port3f_old;
+      if (data & reset_mask)
+        input.graphic_board[player].read_index = 0;
+      else if ((old ^ data) & toggle_mask)
+        input.graphic_board[player].read_index++;
+      input.graphic_board[player].port3f_old = data;
+    }
+  }
   
   /* HCounter is latched on TH Low->High transition */
   io_current = &io_lut[sms.territory][data];
@@ -290,6 +323,36 @@ static uint8_t device_r(int32_t port)
       if(input.pad[port] & INPUT_BUTTON1) temp &= ~0x10;
 
       break;
+
+    /* GRAPHIC BOARD v2 emulation:
+       The board communicates via port 0xDC (player 1) / 0xDD (player 2).
+       Port 0x3F controls the read sequence: bit 4/6 reset, bit 5/7 toggle.
+       The read sequence returns nibbles: buttons, unknown, x-hi, x-lo, y-hi, y-lo.
+       When reset bit is set, returns idle (bits 0-4 cleared). */
+    case DEVICE_GRAPHICBOARD:
+    {
+      uint8_t v = temp & 0xF0;
+      uint8_t reset_mask = (port == 0) ? 0x10 : 0x40;
+      if (sms.ioctrl & reset_mask)
+      {
+        v &= ~0x1F;
+      }
+      else
+      {
+        switch (input.graphic_board[port].read_index & 7)
+        {
+        case 0: v &= ~0x10; v |= (input.graphic_board[port].buttons ^ 0x0f); break;
+        case 1: v |= (input.graphic_board[port].unknown >> 4); break;
+        case 2: v |= (input.graphic_board[port].unknown & 0x0f); break;
+        case 3: v |= (input.graphic_board[port].x >> 4); break;
+        case 4: v |= (input.graphic_board[port].x & 0x0f); break;
+        case 5: v |= (input.graphic_board[port].y >> 4); break;
+        case 6: v |= (input.graphic_board[port].y & 0x0f); break;
+        default: break;
+        }
+      }
+      return v;
+    }
   }
 
   return temp;

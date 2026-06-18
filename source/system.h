@@ -97,6 +97,18 @@ typedef struct
 	/* Sord M5 keyboard matrix, active-high rows Y0-Y6, matching MAME's m5.cpp input ports. */
 	uint8_t m5_key[SORDM5_KEY_ROWS];
 	uint8_t m5_reset;
+	/* Sega Graphic Board v2 state.  x/y are 0-255 pen coordinates,
+	 * buttons is a 3-bit field (bit0=start, bit1=button1, bit2=button2),
+	 * read_index tracks the 0x3F-controlled nibble read sequence,
+	 * and port3f_old stores the previous port 0x3F value for edge
+	 * detection. */
+	struct {
+		uint8_t x, y;
+		uint8_t buttons;
+		uint8_t read_index;
+		uint8_t port3f_old;
+		uint8_t unknown;
+	} graphic_board[2];
 } input_t;
 
 /* Game image structure */

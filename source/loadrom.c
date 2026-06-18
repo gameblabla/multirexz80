@@ -360,6 +360,10 @@ static rominfo_t game_list[] =
 	{0xB289011D, 0, DEVICE_PAD2B, MAPPER_SEGA, DISPLAY_NTSC, TERRITORY_DOMESTIC, CONSOLE_GG, FM_NOT_COMPATIBLE,
 	"Madou Monogatari I (J)"},
 	
+	/* Sega Graphic Board v2 prototype: pen tablet peripheral */
+	{0x276AA542, 0, DEVICE_GRAPHICBOARD, MAPPER_SEGA, DISPLAY_NTSC, TERRITORY_EXPORT, CONSOLE_SMS2, FM_NOT_COMPATIBLE,
+	"Sega Graphic Board v2.0 [Proto]"},
+
 };
 
 #define GAME_DATABASE_CNT ARRAY_SIZE(game_list)
