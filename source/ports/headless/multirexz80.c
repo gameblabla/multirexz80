@@ -57,7 +57,7 @@ static void usage(const char *argv0)
         "\n"
         "Core options:\n"
         "  --frames N                 Run N frames (default: 300)\n"
-        "  --console NAME             auto,sms,sms2,gg,ggms/ggsms,sg1000,coleco,sordm5,systeme,system1,psychos\n"
+        "  --console NAME             auto,sms,sms2,gg,ggms/ggsms,sg1000,coleco,sordm5,systeme,system1,psychos,taitol\n"
         "  --region NAME              auto,ntsc,pal,japan\n"
         "  --bios PATH                BIOS for the selected legacy machine; for .m5 this is Sord M5\n"
         "  --sms-bios PATH            SMS BIOS file\n"
@@ -126,6 +126,7 @@ static int set_console_option(const char *name)
     else if (!strcasecmp(name, "systeme") || !strcasecmp(name, "segae")) option.console = 8;
     else if (!strcasecmp(name, "system1") || !strcasecmp(name, "segas1") || !strcasecmp(name, "sega1")) option.console = 9;
     else if (!strcasecmp(name, "psychos") || !strcasecmp(name, "snkpsychos") || !strcasecmp(name, "snk")) option.console = 10;
+    else if (!strcasecmp(name, "taitol") || !strcasecmp(name, "taito")) option.console = 11;
     else return 0;
     return 1;
 }

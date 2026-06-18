@@ -364,6 +364,8 @@ uint8_t sms_readmem16(uint16_t address)
         return system1_readmem(address);
     if (slot.mapper == MAPPER_SNKPSYCHOS)
         return snk_psychos_readmem(address);
+    if (slot.mapper == MAPPER_TAITOL)
+        return taitol_readmem(address);
     if (slot.mapper == MAPPER_93C46)
         return mapper_93c46_read(address);
     if (slot.mapper == MAPPER_COLECO_MEGACART && address >= 0x8000)
@@ -374,7 +376,7 @@ uint8_t sms_readmem16(uint16_t address)
 
 void mapper_reset(void)
 {
-	if (slot.mapper != MAPPER_SNKPSYCHOS)
+	if (slot.mapper != MAPPER_SNKPSYCHOS && slot.mapper != MAPPER_TAITOL)
 		z80_select_default_context();
 	z80_data_operand_fetch = 0;
 	switch(slot.mapper)
@@ -411,6 +413,9 @@ void mapper_reset(void)
 		break;
 		case MAPPER_SNKPSYCHOS:
 			cpu_writemem16 = snk_psychos_writemem;
+		break;
+		case MAPPER_TAITOL:
+			cpu_writemem16 = taitol_writemem;
 		break;
 		default:
 			cpu_writemem16 = writemem_mapper_sega;
@@ -514,6 +519,12 @@ void mapper_restore_state(void)
         return;
     }
 
+    if (sms.console == CONSOLE_TAITOL)
+    {
+        taitol_memory_map(0);
+        return;
+    }
+
     if ((sms.console != CONSOLE_SG1000) && (sms.console != CONSOLE_SF7000) && (sms.console != CONSOLE_SC3000))
     {
         cpu_readmap[0] = &slot.rom[0];
@@ -596,6 +607,12 @@ void sms_init(void)
 			data_bus_pullup = 0xFF;
 		break;
 
+		case CONSOLE_TAITOL:
+			cpu_writeport16 = taitol_port_w;
+			cpu_readport16 = taitol_port_r;
+			data_bus_pullup = 0xFF;
+		break;
+
 		case CONSOLE_GG:
 			cpu_writeport16 = gg_port_w;
 			cpu_readport16 = gg_port_r;
@@ -627,6 +644,7 @@ void sms_shutdown(void)
 {
 	system1_free();
 	snk_psychos_free();
+	taitol_free();
 }
 
 void sms_reset(void)
@@ -784,6 +802,12 @@ void sms_reset(void)
     case CONSOLE_SNKPSYCHOS:
     {
       snk_psychos_reset();
+      break;
+    }
+
+    case CONSOLE_TAITOL:
+    {
+      taitol_reset();
       break;
     }
 
@@ -1087,6 +1111,10 @@ int32_t sms_irq_callback(int32_t param)
 	#if MULTIREXZ80_ENABLE_SORDM5
 	if (sms.console == CONSOLE_SORDM5)
 		return sordm5_ctc_irq_callback();
+	#endif
+	#if MULTIREXZ80_ENABLE_ARCADE
+	if (sms.console == CONSOLE_TAITOL)
+		return taitol_irq_callback(param);
 	#endif
 	return 0xFF;
 }

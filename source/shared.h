@@ -59,6 +59,7 @@
 #include "system.h"
 #include "video/sega_system1/system1.h"
 #include "video/snk_ikari_psychos/snk_psychos.h"
+#include "video/taito_l/taito_l.h"
 #include "loadrom.h"
 #include "config.h"
 #include "state.h"

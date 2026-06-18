@@ -98,7 +98,7 @@ static char g_sram_path[MAX_PATH];
 typedef enum video_mode_choice { VMODE_AUTO = 0, VMODE_PAL, VMODE_NTSC } video_mode_choice_t;
 typedef enum console_choice {
     C_AUTO = 0, C_COLECO, C_SG1000, C_SORDM5, C_SMS1_JP, C_SMS1_EXPORT,
-    C_SMS2, C_GG, C_GGMS, C_SYSTEME, C_SYSTEM1, C_SNK
+    C_SMS2, C_GG, C_GGMS, C_SYSTEME, C_SYSTEM1, C_SNK, C_TAITOL
 } console_choice_t;
 
 typedef enum action_id {
@@ -268,6 +268,7 @@ static const console_item_t k_console_items[] = {
     {"Sega System E", 8, 0},
     {"Sega System 1/2", 9, 0},
     {"SNK Ikari/Psychos", 10, 0},
+    {"Taito L", 11, 0},
 };
 static const char *k_video_modes[] = { "Auto", "PAL 50 Hz", "NTSC 60 Hz" };
 static const char *k_hotkey_names[] = { "Pause", "Fast forward", "Rewind", "Save state", "Load state", "Screenshot", "Reset", "Fullscreen" };
@@ -381,6 +382,7 @@ static const char *runtime_console_name(uint8_t console) {
     case CONSOLE_SYSTEME: return "Sega System E";
     case CONSOLE_SYSTEM1: return "Sega System 1/2";
     case CONSOLE_SNKPSYCHOS: return "SNK Ikari/Psychos";
+    case CONSOLE_TAITOL: return "Taito L";
     default: return "Unknown";
     }
 }
@@ -1064,7 +1066,7 @@ static void paint_frame(app_state_t *a, HDC hdc) {
     BitBlt(hdc, 0, 0, cw, ch, a->back_dc, 0, 0, SRCCOPY);
 }
 
-static int arcade_active(void) { return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS; }
+static int arcade_active(void) { return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS || sms.console == CONSOLE_TAITOL; }
 static int heavyweight_frame_system(void) { return arcade_active() || sms.console == CONSOLE_COLECO || sms.console == CONSOLE_SORDM5; }
 /* Apply the merged keyboard+joystick action mask to the emulator input each
  * frame.  Idempotent: every control action is set or cleared from the combined
@@ -1960,7 +1962,7 @@ static int parse_cli(app_state_t *a, LPSTR cmdline) {
     if (!wargv) return 0;
     for (int i = 1; i < argc; ++i) {
         char arg[MAX_PATH]; WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, arg, sizeof(arg), NULL, NULL);
-        if (!strcmp(arg, "--console") && i + 1 < argc) { char v[64]; WideCharToMultiByte(CP_UTF8,0,wargv[++i],-1,v,sizeof(v),NULL,NULL); for (int c=0;c<(int)(sizeof(k_console_items)/sizeof(k_console_items[0]));c++) if (str_ieq(v,k_console_items[c].label) || str_ieq(v, "auto")) { a->selected_console = c; break; } if (str_ieq(v,"sms2")) a->selected_console=C_SMS2; else if (str_ieq(v,"sms")||str_ieq(v,"sms1")) a->selected_console=C_SMS1_EXPORT; else if (str_ieq(v,"sms1jp")) a->selected_console=C_SMS1_JP; else if (str_ieq(v,"coleco")||str_ieq(v,"cv")) a->selected_console=C_COLECO; else if (str_ieq(v,"sg")||str_ieq(v,"sg1000")) a->selected_console=C_SG1000; else if (str_ieq(v,"m5")||str_ieq(v,"sordm5")) a->selected_console=C_SORDM5; else if (str_ieq(v,"gg")) a->selected_console=C_GG; else if (str_ieq(v,"ggms")||str_ieq(v,"ggsms")) a->selected_console=C_GGMS; else if (str_ieq(v,"systeme")) a->selected_console=C_SYSTEME; else if (str_ieq(v,"system1")) a->selected_console=C_SYSTEM1; else if (str_ieq(v,"snk")||str_ieq(v,"psychos")) a->selected_console=C_SNK; }
+        if (!strcmp(arg, "--console") && i + 1 < argc) { char v[64]; WideCharToMultiByte(CP_UTF8,0,wargv[++i],-1,v,sizeof(v),NULL,NULL); for (int c=0;c<(int)(sizeof(k_console_items)/sizeof(k_console_items[0]));c++) if (str_ieq(v,k_console_items[c].label) || str_ieq(v, "auto")) { a->selected_console = c; break; } if (str_ieq(v,"sms2")) a->selected_console=C_SMS2; else if (str_ieq(v,"sms")||str_ieq(v,"sms1")) a->selected_console=C_SMS1_EXPORT; else if (str_ieq(v,"sms1jp")) a->selected_console=C_SMS1_JP; else if (str_ieq(v,"coleco")||str_ieq(v,"cv")) a->selected_console=C_COLECO; else if (str_ieq(v,"sg")||str_ieq(v,"sg1000")) a->selected_console=C_SG1000; else if (str_ieq(v,"m5")||str_ieq(v,"sordm5")) a->selected_console=C_SORDM5; else if (str_ieq(v,"gg")) a->selected_console=C_GG; else if (str_ieq(v,"ggms")||str_ieq(v,"ggsms")) a->selected_console=C_GGMS; else if (str_ieq(v,"systeme")) a->selected_console=C_SYSTEME; else if (str_ieq(v,"system1")) a->selected_console=C_SYSTEM1; else if (str_ieq(v,"snk")||str_ieq(v,"psychos")) a->selected_console=C_SNK; else if (str_ieq(v,"taitol")||str_ieq(v,"taito")) a->selected_console=C_TAITOL; }
         else if ((!strcmp(arg,"--region") || !strcmp(arg,"--video-mode")) && i + 1 < argc) { char v[64]; WideCharToMultiByte(CP_UTF8,0,wargv[++i],-1,v,sizeof(v),NULL,NULL); if (str_ieq(v,"pal")||str_ieq(v,"50")||str_ieq(v,"50hz")) a->selected_video_mode=VMODE_PAL; else if (str_ieq(v,"ntsc")||str_ieq(v,"60")||str_ieq(v,"60hz")) a->selected_video_mode=VMODE_NTSC; else a->selected_video_mode=VMODE_AUTO; }
         else if (!strcmp(arg,"--bios") && i+1<argc) WideCharToMultiByte(CP_UTF8,0,wargv[++i],-1,a->sms_bios_path,sizeof(a->sms_bios_path),NULL,NULL);
         else if (!strcmp(arg,"--coleco-bios") && i+1<argc) WideCharToMultiByte(CP_UTF8,0,wargv[++i],-1,a->coleco_bios_path,sizeof(a->coleco_bios_path),NULL,NULL);

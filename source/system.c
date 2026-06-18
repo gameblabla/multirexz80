@@ -54,6 +54,7 @@ int32_t system_cycles_per_line(void)
 	if (sms.console == CONSOLE_SYSTEME) return SYSTEME_CYCLES_PER_LINE;
 	if (sms.console == CONSOLE_SYSTEM1) return SYSTEM1_CYCLES_PER_LINE;
 	if (sms.console == CONSOLE_SNKPSYCHOS) return SNK_PSYCHOS_CYCLES_PER_LINE;
+	if (sms.console == CONSOLE_TAITOL) return TAITOL_CYCLES_PER_LINE;
 	return CYCLES_PER_LINE;
 }
 
@@ -68,6 +69,8 @@ int32_t system_hcounter_index(void)
 		dot = (dot * CYCLES_PER_LINE) / SYSTEM1_CYCLES_PER_LINE;
 	else if (sms.console == CONSOLE_SNKPSYCHOS)
 		dot = (dot * CYCLES_PER_LINE) / SNK_PSYCHOS_CYCLES_PER_LINE;
+	else if (sms.console == CONSOLE_TAITOL)
+		dot = (dot * CYCLES_PER_LINE) / TAITOL_CYCLES_PER_LINE;
 
 	if (dot < 0) dot = 0;
 	if (dot >= CYCLES_PER_LINE) dot = CYCLES_PER_LINE - 1;
@@ -157,9 +160,15 @@ void system_frame(uint32_t skip_render)
 		return;
 	}
 
+	if (sms.console == CONSOLE_TAITOL)
+	{
+		taitol_frame(skip_render);
+		return;
+	}
+
 	/* Debounce pause key.  Arcade drivers use dedicated coin/service/start bits;
 	 * do not assert the SMS pause/NMI path while an arcade game is running. */
-	if((sms.console != CONSOLE_SYSTEME) && (sms.console != CONSOLE_SYSTEM1) && (sms.console != CONSOLE_SNKPSYCHOS) && (input.system & INPUT_PAUSE))
+	if((sms.console != CONSOLE_SYSTEME) && (sms.console != CONSOLE_SYSTEM1) && (sms.console != CONSOLE_SNKPSYCHOS) && (sms.console != CONSOLE_TAITOL) && (input.system & INPUT_PAUSE))
 	{
 		if(!sms.paused)
 		{
@@ -365,6 +374,7 @@ void system_reset(void)
 	render_reset();
 	if (sms.console == CONSOLE_SYSTEM1) system1_reset();
 	if (sms.console == CONSOLE_SNKPSYCHOS) snk_psychos_reset();
+	if (sms.console == CONSOLE_TAITOL) taitol_reset();
 	MULTIREXZ80_sound_reset();
 	system_manage_sram(cart.sram, SLOT_CART, SRAM_LOAD);
 	if (cart.mapper == MAPPER_93C46) eeprom93c46_load_from_sram(cart.sram);

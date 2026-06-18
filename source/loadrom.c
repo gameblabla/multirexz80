@@ -380,6 +380,7 @@ static int console_feature_enabled(uint8_t console)
         case CONSOLE_SYSTEME:
         case CONSOLE_SYSTEM1:
         case CONSOLE_SNKPSYCHOS:
+        case CONSOLE_TAITOL:
             return 0;
 #endif
         default:
@@ -401,7 +402,8 @@ static void apply_disabled_console_fallback(void)
     if (cart.mapper == MAPPER_COLECO_MEGACART ||
         cart.mapper == MAPPER_SYSTEME ||
         cart.mapper == MAPPER_SYSTEM1 ||
-        cart.mapper == MAPPER_SNKPSYCHOS)
+        cart.mapper == MAPPER_SNKPSYCHOS ||
+        cart.mapper == MAPPER_TAITOL)
     {
         cart.mapper = MAPPER_SEGA;
     }
@@ -2125,6 +2127,481 @@ static int load_snk_psychos_zip(const char *filename)
     return 1;
 }
 
+/* ---- Taito L-System zip loader ---------------------------------------- */
+/* ROM_LOAD16_BYTE / ROM_LOAD32_BYTE are represented by a non-1 stride:
+ * stride=1 -> ROM_LOAD, stride=2 -> ROM_LOAD16_BYTE, stride=4 -> ROM_LOAD32_BYTE.
+ * The file bytes are placed at offset, offset+stride, offset+2*stride, ... */
+typedef struct
+{
+    const char *name;
+    int region;
+    uint32_t offset;
+    uint32_t size;
+    uint32_t crc;
+    uint32_t stride;   /* 1 = ROM_LOAD, 2 = ROM_LOAD16_BYTE, 4 = ROM_LOAD32_BYTE */
+} taitol_zip_file_t;
+
+typedef struct
+{
+    const char *set_name;
+    int variant;
+    const taitol_zip_file_t *files;
+} taitol_zip_set_t;
+
+#define TLF_LD(n,reg,off,sz,crc)        { (n), (reg), (off), (sz), (crc), 1u }
+#define TLF_LD16(n,reg,off,sz,crc)      { (n), (reg), (off), (sz), (crc), 2u }
+#define TLF_LD32(n,reg,off,sz,crc)      { (n), (reg), (off), (sz), (crc), 4u }
+#define TLF_END                          { NULL, 0, 0, 0, 0, 0 }
+
+static const taitol_zip_file_t taitol_raimais_files[] = {
+    TLF_LD("b36_11-1.ic7", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0xf19fb0d5),
+    TLF_LD("b36_09.ic13",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x9c466e43),
+    TLF_LD("b36_06.ic24",  TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x29bbc4f8),
+    TLF_LD("b36_07.ic2",   TAITOL_REGION_SLAVE, 0x00000, 0x10000, 0x4f3737e6),
+    TLF_LD("b36-01.ic6",   TAITOL_REGION_GFX,   0x00000, 0x80000, 0x89355cb2),
+    TLF_LD("b36-02.ic12",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0xe71da5db),
+    TLF_LD("b36-03.ic28",  TAITOL_REGION_YM2610,0x00000, 0x80000, 0x96166516),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_raimaisj_files[] = {
+    TLF_LD("b36_08-1.ic7", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x6cc8f79f),
+    TLF_LD("b36_09.ic13",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x9c466e43),
+    TLF_LD("b36_06.ic24",  TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x29bbc4f8),
+    TLF_LD("b36_07.ic2",   TAITOL_REGION_SLAVE, 0x00000, 0x10000, 0x4f3737e6),
+    TLF_LD("b36-01.ic6",   TAITOL_REGION_GFX,   0x00000, 0x80000, 0x89355cb2),
+    TLF_LD("b36-02.ic12",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0xe71da5db),
+    TLF_LD("b36-03.ic28",  TAITOL_REGION_YM2610,0x00000, 0x80000, 0x96166516),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_raimaisjo_files[] = {
+    TLF_LD("b36_08.ic7",   TAITOL_REGION_MAIN, 0x00000, 0x20000, 0xf40b9178),
+    TLF_LD("b36_09.ic13",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x9c466e43),
+    TLF_LD("b36_06.ic24",  TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x29bbc4f8),
+    TLF_LD("b36_07.ic2",   TAITOL_REGION_SLAVE, 0x00000, 0x10000, 0x4f3737e6),
+    TLF_LD("b36-01.ic6",   TAITOL_REGION_GFX,   0x00000, 0x80000, 0x89355cb2),
+    TLF_LD("b36-02.ic12",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0xe71da5db),
+    TLF_LD("b36-03.ic28",  TAITOL_REGION_YM2610,0x00000, 0x80000, 0x96166516),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_fhawk_files[] = {
+    TLF_LD("b70-11.ic3",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x7d9f7583),
+    TLF_LD("b70-03.ic2",  TAITOL_REGION_MAIN, 0x20000, 0x80000, 0x42d5a9b8),
+    TLF_LD("b70-09.ic31", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x85cccaa2),
+    TLF_LD("b70-08.ic12", TAITOL_REGION_SLAVE, 0x00000, 0x20000, 0x4d795f48),
+    TLF_LD("b70-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0xfcdf67e2),
+    TLF_LD("b70-02.ic2",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x35f7172e),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_fhawkj_files[] = {
+    TLF_LD("b70-07.ic3",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x939114af),
+    TLF_LD("b70-03.ic2",  TAITOL_REGION_MAIN, 0x20000, 0x80000, 0x42d5a9b8),
+    TLF_LD("b70-09.ic31", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x85cccaa2),
+    TLF_LD("b70-08.ic12", TAITOL_REGION_SLAVE, 0x00000, 0x20000, 0x4d795f48),
+    TLF_LD("b70-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0xfcdf67e2),
+    TLF_LD("b70-02.ic2",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x35f7172e),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_champwr_files[] = {
+    TLF_LD("c01-13.rom", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x7ef47525),
+    TLF_LD("c01-04.rom", TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x358bd076),
+    TLF_LD("c01-08.rom", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x810efff8),
+    TLF_LD("c01-07.rom", TAITOL_REGION_SLAVE, 0x00000, 0x20000, 0x5117c98f),
+    TLF_LD("c01-01.rom", TAITOL_REGION_GFX,   0x000000, 0x80000, 0xf302e6e9),
+    TLF_LD("c01-02.rom", TAITOL_REGION_GFX,   0x080000, 0x80000, 0x1e0476c4),
+    TLF_LD("c01-03.rom", TAITOL_REGION_GFX,   0x100000, 0x80000, 0x2a142dbc),
+    TLF_LD("c01-05.rom", TAITOL_REGION_ADPCM, 0x00000, 0x20000, 0x22efad4a),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_champwru_files[] = {
+    TLF_LD("c01-12.rom", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x09f345b3),
+    TLF_LD("c01-04.rom", TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x358bd076),
+    TLF_LD("c01-08.rom", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x810efff8),
+    TLF_LD("c01-07.rom", TAITOL_REGION_SLAVE, 0x00000, 0x20000, 0x5117c98f),
+    TLF_LD("c01-01.rom", TAITOL_REGION_GFX,   0x000000, 0x80000, 0xf302e6e9),
+    TLF_LD("c01-02.rom", TAITOL_REGION_GFX,   0x080000, 0x80000, 0x1e0476c4),
+    TLF_LD("c01-03.rom", TAITOL_REGION_GFX,   0x100000, 0x80000, 0x2a142dbc),
+    TLF_LD("c01-05.rom", TAITOL_REGION_ADPCM, 0x00000, 0x20000, 0x22efad4a),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_champwrj_files[] = {
+    TLF_LD("c01-06.bin", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x90fa1409),
+    TLF_LD("c01-04.rom", TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x358bd076),
+    TLF_LD("c01-08.rom", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x810efff8),
+    TLF_LD("c01-07.rom", TAITOL_REGION_SLAVE, 0x00000, 0x20000, 0x5117c98f),
+    TLF_LD("c01-01.rom", TAITOL_REGION_GFX,   0x000000, 0x80000, 0xf302e6e9),
+    TLF_LD("c01-02.rom", TAITOL_REGION_GFX,   0x080000, 0x80000, 0x1e0476c4),
+    TLF_LD("c01-03.rom", TAITOL_REGION_GFX,   0x100000, 0x80000, 0x2a142dbc),
+    TLF_LD("c01-05.rom", TAITOL_REGION_ADPCM, 0x00000, 0x20000, 0x22efad4a),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_kurikint_files[] = {
+    TLF_LD("b42-09.ic2",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0xe97c4394),
+    TLF_LD("b42-06.ic6",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0xfa15fd65),
+    TLF_LD("b42-07.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x0f2719c0),
+    TLF_LD("b42-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0x7d1a1fec),
+    TLF_LD("b42-02.ic5",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x1a52e65c),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_kurikintw_files[] = {
+    TLF_LD("b42-10.ic2",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x87460109),
+    TLF_LD("b42-06.ic6",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0xfa15fd65),
+    TLF_LD("b42-07.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x0f2719c0),
+    TLF_LD("b42-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0x7d1a1fec),
+    TLF_LD("b42-02.ic5",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x1a52e65c),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_kurikintu_files[] = {
+    TLF_LD("b42-08.ic2",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x7075122e),
+    TLF_LD("b42-06.ic6",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0xfa15fd65),
+    TLF_LD("b42-07.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x0f2719c0),
+    TLF_LD("b42-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0x7d1a1fec),
+    TLF_LD("b42-02.ic5",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x1a52e65c),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_kurikintj_files[] = {
+    TLF_LD("b42-05.ic2",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x077222b8),
+    TLF_LD("b42-06.ic6",  TAITOL_REGION_MAIN, 0x20000, 0x20000, 0xfa15fd65),
+    TLF_LD("b42-07.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x0f2719c0),
+    TLF_LD("b42-01.ic1",  TAITOL_REGION_GFX,   0x00000, 0x80000, 0x7d1a1fec),
+    TLF_LD("b42-02.ic5",  TAITOL_REGION_GFX,   0x80000, 0x80000, 0x1a52e65c),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_kurikinta_files[] = {
+    TLF_LD("kk_ic2.ic2", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x908603f2),
+    TLF_LD("kk_ic6.ic6", TAITOL_REGION_MAIN, 0x20000, 0x20000, 0xa4a957b1),
+    TLF_LD("b42-07.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x10000, 0x0f2719c0),
+    TLF_LD16("kk_1-1l.rom", TAITOL_REGION_GFX, 0x00000, 0x20000, 0xdf1d4fcd),
+    TLF_LD16("kk_2-2l.rom", TAITOL_REGION_GFX, 0x40000, 0x20000, 0xfca7f647),
+    TLF_LD16("kk_5-3l.rom", TAITOL_REGION_GFX, 0x80000, 0x20000, 0xd080fde1),
+    TLF_LD16("kk_7-4l.rom", TAITOL_REGION_GFX, 0xc0000, 0x20000, 0xf5bf6829),
+    TLF_LD16("kk_3-1h.rom", TAITOL_REGION_GFX, 0x00001, 0x20000, 0x71af848e),
+    TLF_LD16("kk_4-2h.rom", TAITOL_REGION_GFX, 0x40001, 0x20000, 0xcebb5bac),
+    TLF_LD16("kk_6-3h.rom", TAITOL_REGION_GFX, 0x80001, 0x20000, 0x322e3752),
+    TLF_LD16("kk_8-4h.rom", TAITOL_REGION_GFX, 0xc0001, 0x20000, 0x117bde99),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plotting_files[] = {
+    TLF_LD("ic10",       TAITOL_REGION_MAIN, 0x00000, 0x10000, 0xbe240921),
+    TLF_LD16("b96-07.ic9", TAITOL_REGION_GFX, 0x00000, 0x10000, 0x0713a387),
+    TLF_LD16("b96-08.ic8", TAITOL_REGION_GFX, 0x00001, 0x10000, 0x55b8e294),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plottinga_files[] = {
+    TLF_LD("plot01.ic10", TAITOL_REGION_MAIN, 0x00000, 0x10000, 0x5b30bc25),
+    TLF_LD16("b96-02.ic9", TAITOL_REGION_GFX, 0x00000, 0x10000, 0x6e0bad2a),
+    TLF_LD16("b96-03.ic8", TAITOL_REGION_GFX, 0x00001, 0x10000, 0xfb5f3ca4),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plottingb_files[] = {
+    TLF_LD("b96-06.ic10", TAITOL_REGION_MAIN, 0x00000, 0x10000, 0xf89a54b1),
+    TLF_LD16("b96-02.ic9", TAITOL_REGION_GFX, 0x00000, 0x10000, 0x6e0bad2a),
+    TLF_LD16("b96-03.ic8", TAITOL_REGION_GFX, 0x00001, 0x10000, 0xfb5f3ca4),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plottingu_files[] = {
+    TLF_LD("b96-05.ic10", TAITOL_REGION_MAIN, 0x00000, 0x10000, 0xafb99d1f),
+    TLF_LD16("b96-02.ic9", TAITOL_REGION_GFX, 0x00000, 0x10000, 0x6e0bad2a),
+    TLF_LD16("b96-03.ic8", TAITOL_REGION_GFX, 0x00001, 0x10000, 0xfb5f3ca4),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_flipull_files[] = {
+    TLF_LD("b96-01.ic10", TAITOL_REGION_MAIN, 0x00000, 0x10000, 0x65993978),
+    TLF_LD16("b96-07.ic9", TAITOL_REGION_GFX, 0x00000, 0x10000, 0x0713a387),
+    TLF_LD16("b96-08.ic8", TAITOL_REGION_GFX, 0x00001, 0x10000, 0x55b8e294),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznic_files[] = {
+    TLF_LD("c20-09.ic11", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x156d6de1),
+    TLF_LD("c20-01.ic4",  TAITOL_REGION_MCU,  0x0000,  0x0800,  0x085f68b4),
+    TLF_LD16("c20-07.ic10", TAITOL_REGION_GFX, 0x00000, 0x10000, 0xbe12749a),
+    TLF_LD16("c20-06.ic9",  TAITOL_REGION_GFX, 0x00001, 0x10000, 0xac85a9c5),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznicu_files[] = {
+    TLF_LD("c20-10.ic11", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x3522d2e5),
+    TLF_LD("c20-01.ic4",  TAITOL_REGION_MCU,  0x0000,  0x0800,  0x085f68b4),
+    TLF_LD16("c20-03.ic10", TAITOL_REGION_GFX, 0x00000, 0x20000, 0x4264056c),
+    TLF_LD16("c20-02.ic9",  TAITOL_REGION_GFX, 0x00001, 0x20000, 0x3c115f8b),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznicj_files[] = {
+    TLF_LD("c20-04.ic11", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0xa4150b6c),
+    TLF_LD("c20-01.ic4",  TAITOL_REGION_MCU,  0x0000,  0x0800,  0x085f68b4),
+    TLF_LD16("c20-03.ic10", TAITOL_REGION_GFX, 0x00000, 0x20000, 0x4264056c),
+    TLF_LD16("c20-02.ic9",  TAITOL_REGION_GFX, 0x00001, 0x20000, 0x3c115f8b),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznici_files[] = {
+    TLF_LD("1.ic11",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x4612f5e0),
+    TLF_LD16("u10.ic10", TAITOL_REGION_GFX, 0x00000, 0x20000, 0x4264056c),
+    TLF_LD16("3.ic9",    TAITOL_REGION_GFX, 0x00001, 0x20000, 0x2bf5232a),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznicb_files[] = {
+    TLF_LD("ic11.bin", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x2510df4d),
+    TLF_LD16("ic10.bin", TAITOL_REGION_GFX, 0x00000, 0x10000, 0xbe12749a),
+    TLF_LD16("ic9.bin",  TAITOL_REGION_GFX, 0x00001, 0x10000, 0x0f183340),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_puzznicba_files[] = {
+    TLF_LD("18.ic10", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x8349eb3b),
+    TLF_LD16("19.ic9", TAITOL_REGION_GFX, 0x00000, 0x20000, 0x4264056c),
+    TLF_LD16("20.ic8", TAITOL_REGION_GFX, 0x00001, 0x20000, 0x3c115f8b),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_horshoes_files[] = {
+    TLF_LD("c47-03.ic6", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x37e15b20),
+    /* horshoes gfx uses ROM_CONTINUE interleaving; we approximate with
+     * straight 16-bit loads into the four quadrants.  MAME loads each
+     * file at 0/0x20000 with continue at 0x40000/0x60000. */
+    TLF_LD16("c47-02.ic5",  TAITOL_REGION_GFX, 0x00000, 0x10000, 0x35f96526),
+    TLF_LD16("c47-01.ic11", TAITOL_REGION_GFX, 0x20000, 0x10000, 0x031c73d8),
+    TLF_LD16("c47-04.ic4",  TAITOL_REGION_GFX, 0x00001, 0x10000, 0xaeac7121),
+    TLF_LD16("c47-05.ic10", TAITOL_REGION_GFX, 0x20001, 0x10000, 0xb2a3dafe),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_palamed_files[] = {
+    TLF_LD("palamedes_prg_ic6.ic6", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0xee957b0e),
+    TLF_LD16("chr-l_ic9.ic9", TAITOL_REGION_GFX, 0x00000, 0x20000, 0xc7bbe460),
+    TLF_LD16("chr-h_ic7.ic7", TAITOL_REGION_GFX, 0x00001, 0x20000, 0xfcd86e44),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_palamedj_files[] = {
+    TLF_LD("c63-02.ic6", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x55a82bb2),
+    TLF_LD16("c63-04.ic9", TAITOL_REGION_GFX, 0x00000, 0x20000, 0xc7bbe460),
+    TLF_LD16("c63-03.ic7", TAITOL_REGION_GFX, 0x00001, 0x20000, 0xfcd86e44),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_cachat_files[] = {
+    TLF_LD("cac6",  TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x8105cf5f),
+    TLF_LD16("cac9",  TAITOL_REGION_GFX, 0x00000, 0x20000, 0xbc462914),
+    TLF_LD16("cac10", TAITOL_REGION_GFX, 0x40000, 0x20000, 0xecc64b31),
+    TLF_LD16("cac7",  TAITOL_REGION_GFX, 0x00001, 0x20000, 0x7fb71578),
+    TLF_LD16("cac8",  TAITOL_REGION_GFX, 0x40001, 0x20000, 0xd2a63799),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_tubeit_files[] = {
+    TLF_LD("t-i_02.6", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x54730669),
+    TLF_LD16("t-i_03.7", TAITOL_REGION_GFX, 0x00001, 0x40000, 0xe1c3fed0),
+    TLF_LD16("t-i_04.9", TAITOL_REGION_GFX, 0x00000, 0x40000, 0xb4a6e31d),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_cubybop_files[] = {
+    TLF_LD("cb06.6", TAITOL_REGION_MAIN, 0x00000, 0x40000, 0x66b89a85),
+    TLF_LD16("cb09.9",  TAITOL_REGION_GFX, 0x00000, 0x40000, 0x5f831e59),
+    TLF_LD16("cb10.10", TAITOL_REGION_GFX, 0x80000, 0x40000, 0x430510fc),
+    TLF_LD16("cb07.7",  TAITOL_REGION_GFX, 0x00001, 0x40000, 0x3582de99),
+    TLF_LD16("cb08.8",  TAITOL_REGION_GFX, 0x80001, 0x40000, 0x09e18a51),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plgirls_files[] = {
+    TLF_LD("pg03.ic6", TAITOL_REGION_MAIN, 0x00000, 0x40000, 0x6ca73092),
+    TLF_LD16("pg02.ic9", TAITOL_REGION_GFX, 0x00000, 0x40000, 0x3cf05ca9),
+    TLF_LD16("pg01.ic7", TAITOL_REGION_GFX, 0x00001, 0x40000, 0x79e41e74),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plgirls2_files[] = {
+    TLF_LD("pg2_1j.ic6", TAITOL_REGION_MAIN, 0x00000, 0x40000, 0xf924197a),
+    TLF_LD16("cho-l.ic9", TAITOL_REGION_GFX, 0x00000, 0x80000, 0x956384ec),
+    TLF_LD16("cho-h.ic7", TAITOL_REGION_GFX, 0x00001, 0x80000, 0x992f99b1),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_plgirls2b_files[] = {
+    TLF_LD("plgirls2b/playgirls2b.d1", TAITOL_REGION_MAIN, 0x00000, 0x40000, 0xd58159fa),
+    TLF_LD32("plgirls2b/playgirls2b.d8", TAITOL_REGION_GFX, 0x00003, 0x40000, 0x22df48b5),
+    TLF_LD32("plgirls2b/playgirls2b.d4", TAITOL_REGION_GFX, 0x00001, 0x40000, 0xbc9e2192),
+    TLF_LD32("plgirls2b/playgirls2b.b6", TAITOL_REGION_GFX, 0x00000, 0x40000, 0xaac6c90b),
+    TLF_LD32("plgirls2b/playgirls2b.d3", TAITOL_REGION_GFX, 0x00002, 0x40000, 0x75d82fab),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_lagirl_files[] = {
+    TLF_LD("rom1", TAITOL_REGION_MAIN, 0x00000, 0x40000, 0xba1acfdb),
+    TLF_LD32("rom2", TAITOL_REGION_GFX, 0x00003, 0x20000, 0x4c739a30),
+    TLF_LD32("rom3", TAITOL_REGION_GFX, 0x00001, 0x20000, 0x4cf22a4b),
+    TLF_LD32("rom4", TAITOL_REGION_GFX, 0x00002, 0x20000, 0x7dcd6696),
+    TLF_LD32("rom5", TAITOL_REGION_GFX, 0x00000, 0x20000, 0xb1782816),
+    TLF_END
+};
+static const taitol_zip_file_t taitol_evilston_files[] = {
+    TLF_LD("c67-03.ic2", TAITOL_REGION_MAIN, 0x00000, 0x20000, 0x53419982),
+    TLF_LD("c67-04.ic6", TAITOL_REGION_MAIN, 0x20000, 0x20000, 0x55d57e19),
+    TLF_LD("c67-05.ic22", TAITOL_REGION_AUDIO, 0x00000, 0x20000, 0x94d3a642),
+    TLF_LD("c67-01.ic1", TAITOL_REGION_GFX,   0x00000, 0x80000, 0x2f351bf4),
+    TLF_LD("c67-02.ic5", TAITOL_REGION_GFX,   0x80000, 0x80000, 0xeb4f895c),
+    TLF_END
+};
+
+static const taitol_zip_set_t taitol_zip_sets[] = {
+    {"raimais",   TAITOL_GAME_RAIMAIS,   taitol_raimais_files},
+    {"raimaisj",  TAITOL_GAME_RAIMAISJ,  taitol_raimaisj_files},
+    {"raimaisjo", TAITOL_GAME_RAIMAISJO, taitol_raimaisjo_files},
+    {"fhawk",     TAITOL_GAME_FHAWK,      taitol_fhawk_files},
+    {"fhawkj",    TAITOL_GAME_FHAWKJ,     taitol_fhawkj_files},
+    {"champwr",   TAITOL_GAME_CHAMPWR,    taitol_champwr_files},
+    {"champwru",  TAITOL_GAME_CHAMPWRU,   taitol_champwru_files},
+    {"champwrj",  TAITOL_GAME_CHAMPWRJ,   taitol_champwrj_files},
+    {"kurikint",  TAITOL_GAME_KURIKINT,   taitol_kurikint_files},
+    {"kurikintw", TAITOL_GAME_KURIKINTW,  taitol_kurikintw_files},
+    {"kurikintu", TAITOL_GAME_KURIKINTU,   taitol_kurikintu_files},
+    {"kurikintj", TAITOL_GAME_KURIKINTJ,  taitol_kurikintj_files},
+    {"kurikinta", TAITOL_GAME_KURIKINTA,  taitol_kurikinta_files},
+    {"plotting",  TAITOL_GAME_PLOTTING,   taitol_plotting_files},
+    {"plottinga", TAITOL_GAME_PLOTTINGA,  taitol_plottinga_files},
+    {"plottingb", TAITOL_GAME_PLOTTINGB,  taitol_plottingb_files},
+    {"plottingu", TAITOL_GAME_PLOTTINGU,  taitol_plottingu_files},
+    {"flipull",   TAITOL_GAME_FLIPULL,    taitol_flipull_files},
+    {"puzznic",   TAITOL_GAME_PUZZNIC,    taitol_puzznic_files},
+    {"puzznicu",  TAITOL_GAME_PUZZNICU,   taitol_puzznicu_files},
+    {"puzznicj",  TAITOL_GAME_PUZZNICJ,   taitol_puzznicj_files},
+    {"puzznici",  TAITOL_GAME_PUZZNICI,   taitol_puzznici_files},
+    {"puzznicb",  TAITOL_GAME_PUZZNICB,   taitol_puzznicb_files},
+    {"puzznicba", TAITOL_GAME_PUZZNICBA,  taitol_puzznicba_files},
+    {"horshoes",  TAITOL_GAME_HORSHOES,   taitol_horshoes_files},
+    {"palamed",   TAITOL_GAME_PALAMED,    taitol_palamed_files},
+    {"palamedj",  TAITOL_GAME_PALAMEDJ,   taitol_palamedj_files},
+    {"cachat",    TAITOL_GAME_CACHAT,     taitol_cachat_files},
+    {"tubeit",    TAITOL_GAME_TUBEIT,     taitol_tubeit_files},
+    {"cubybop",   TAITOL_GAME_CUBYBOP,    taitol_cubybop_files},
+    {"plgirls",   TAITOL_GAME_PLGIRLS,    taitol_plgirls_files},
+    {"lagirl",    TAITOL_GAME_LAGIRL,     taitol_lagirl_files},
+    {"plgirls2",  TAITOL_GAME_PLGIRLS2,   taitol_plgirls2_files},
+    {"plgirls2b", TAITOL_GAME_PLGIRLS2B,  taitol_plgirls2b_files},
+    {"evilston",  TAITOL_GAME_EVILSTON,   taitol_evilston_files},
+    {NULL, 0, NULL}
+};
+
+static int load_zip_member_to_taitol(unzFile zhandle, const taitol_zip_file_t *file)
+{
+    uint8_t *tmp;
+    int ok = 0;
+    int i;
+    if (!file) return 0;
+    tmp = (uint8_t *)malloc(file->size);
+    if (!tmp) return 0;
+    if (load_zip_member_exact(zhandle, file->name, tmp, file->size, file->crc))
+    {
+        if (file->stride <= 1)
+        {
+            ok = taitol_set_region(file->region, file->offset, tmp, file->size);
+        }
+        else
+        {
+            /* Interleave the file bytes into the destination region at
+             * offset, offset+stride, offset+2*stride, ...  This emulates
+             * MAME's ROM_LOAD16_BYTE / ROM_LOAD32_BYTE. */
+            uint8_t *dst = NULL;
+            uint32_t limit = 0;
+            switch (file->region)
+            {
+                case TAITOL_REGION_MAIN:   dst = taitol_main_rom_ptr();   limit = 0; break;
+                case TAITOL_REGION_GFX:    dst = taitol_gfx_rom_ptr();    limit = 0; break;
+                default:                   dst = NULL;                    break;
+            }
+            (void)limit;
+            if (dst)
+            {
+                uint32_t max_off = file->offset + (file->size - 1u) * file->stride;
+                /* Place bytes directly; taitol_set_region isn't used for
+                 * interleaved loads because the destination region is
+                 * written sparsely. */
+                for (i = 0; i < (int)file->size; i++)
+                {
+                    uint32_t a = file->offset + (uint32_t)i * file->stride;
+                    /* Bounds checking is done against the region allocation. */
+                    dst[a] = tmp[i];
+                    (void)max_off;
+                }
+                ok = 1;
+                if (file->region == TAITOL_REGION_GFX)
+                    taitol_invalidate_gfx();
+            }
+        }
+    }
+    free(tmp);
+    return ok;
+}
+
+static int load_taitol_zip(const char *filename)
+{
+    unzFile zhandle = (unzFile)1;
+    int i, ok;
+    const taitol_zip_set_t *set;
+    uint8_t *main_region;
+
+    for (set = taitol_zip_sets; set->set_name; set++)
+    {
+        if (zip_path_stem_ieq(filename, set->set_name))
+            break;
+    }
+    if (!set->set_name)
+        return 0;
+
+    zip_member_load_path = filename;
+    if (!taitol_alloc())
+    {
+        zip_member_load_path = NULL;
+        return 0;
+    }
+    taitol_clear_roms();
+    /* Allocate a main region buffer for cart.rom.  Use the largest main
+     * ROM size we support. */
+    main_region = (uint8_t *)malloc(0x10000);
+    if (!main_region)
+    {
+        zip_member_load_path = NULL;
+        return 0;
+    }
+    memset(main_region, 0xff, 0x10000);
+
+    ok = 1;
+    for (i = 0; set->files[i].name; i++)
+    {
+        const taitol_zip_file_t *f = &set->files[i];
+        if (f->stride <= 1 && f->region == TAITOL_REGION_MAIN &&
+            f->offset + f->size <= 0x10000)
+        {
+            /* Also copy main ROM into cart.rom for CRC / display. */
+            uint8_t *tmp = (uint8_t *)malloc(f->size);
+            if (!tmp) { ok = 0; break; }
+            if (load_zip_member_exact(zhandle, f->name, tmp, f->size, f->crc))
+            {
+                if (!taitol_set_region(f->region, f->offset, tmp, f->size))
+                    { free(tmp); ok = 0; break; }
+                memcpy(main_region + f->offset, tmp, f->size);
+            }
+            else
+            {
+                free(tmp);
+                ok = 0;
+                break;
+            }
+            free(tmp);
+        }
+        else
+        {
+            if (!load_zip_member_to_taitol(zhandle, f))
+            {
+                ok = 0;
+                break;
+            }
+        }
+    }
+    zip_member_load_path = NULL;
+    if (!ok)
+    {
+        free(main_region);
+        return 0;
+    }
+    cart.rom = main_region;
+    cart.size = 0x10000;
+    cart.crc = 0;
+    if (cart.rom && cart.size)
+        cart.crc = crc32(0, cart.rom, cart.size);
+    option.console = 11;  /* CONSOLE_TAITOL in set_config() */
+    taitol_set_game_variant(set->variant);
+    return 1;
+}
+
 static int load_systeme_zip_set(unzFile zhandle, const systeme_zip_game_t *game, uint8_t *region)
 {
     int i;
@@ -2333,6 +2810,15 @@ void set_config()
 			sms.device[0] = DEVICE_PAD2B;
 			sms.device[1] = DEVICE_PAD2B;
 		break;
+		case 11:
+			sms.console = CONSOLE_TAITOL;
+			cart.mapper = MAPPER_TAITOL;
+			sms.display = DISPLAY_NTSC;
+			sms.territory = TERRITORY_EXPORT;
+			sms.use_fm = FM_NOT_COMPATIBLE;
+			sms.device[0] = DEVICE_PAD2B;
+			sms.device[1] = DEVICE_PAD2B;
+		break;
 #endif
 	}
 
@@ -2390,6 +2876,7 @@ void free_rom(void)
 	}
 	system1_free();
 	snk_psychos_free();
+	taitol_free();
 }
 
 
@@ -2444,7 +2931,7 @@ uint32_t load_rom (char *filename)
 		uint32_t zip_size = 0;
 		int loaded_arcade_zip = 0;
 #if MULTIREXZ80_ENABLE_ARCADE
-		loaded_arcade_zip = load_system1_zip(filename) || load_systeme_zip(filename) || load_snk_psychos_zip(filename);
+		loaded_arcade_zip = load_system1_zip(filename) || load_systeme_zip(filename) || load_snk_psychos_zip(filename) || load_taitol_zip(filename);
 #endif
 		if (loaded_arcade_zip)
 		{

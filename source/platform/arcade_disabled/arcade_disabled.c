@@ -73,3 +73,24 @@ int snk_psychos_audio_mixer_gain_num(int headroom_db) { (void)headroom_db; retur
 uint32_t snk_psychos_state_size(void) { return 0; }
 int snk_psychos_save_state(FILE *fd) { (void)fd; return 0; }
 int snk_psychos_load_state(FILE *fd, uint32_t size) { (void)fd; (void)size; return 0; }
+
+int taitol_alloc(void) { return 0; }
+void taitol_free(void) { }
+void taitol_clear_roms(void) { }
+int taitol_set_region(int region, uint32_t offset, const uint8_t *data, uint32_t size)
+{ (void)region; (void)offset; (void)data; (void)size; return 0; }
+void taitol_set_game_variant(int variant) { (void)variant; }
+void taitol_memory_map(int clear_ram) { (void)clear_ram; }
+uint8_t taitol_readmem(uint16_t address) { (void)address; return 0xff; }
+void taitol_writemem(uint16_t address, uint8_t data) { (void)address; (void)data; }
+uint8_t taitol_port_r(uint16_t port) { (void)port; return 0xff; }
+void taitol_port_w(uint16_t port, uint8_t data) { (void)port; (void)data; }
+void taitol_reset(void) { }
+void taitol_frame(uint32_t skip_render) { (void)skip_render; }
+int32_t taitol_irq_callback(int32_t param) { (void)param; return 0xff; }
+void taitol_sound_reset(void) { }
+void taitol_sound_update(int16_t **buffer, int32_t length) { (void)buffer; (void)length; }
+int taitol_audio_mixer_gain_num(int headroom_db) { (void)headroom_db; return 384; }
+uint32_t taitol_state_size(void) { return 0; }
+int taitol_save_state(FILE *fd) { (void)fd; return 0; }
+int taitol_load_state(FILE *fd, uint32_t size) { (void)fd; (void)size; return 0; }

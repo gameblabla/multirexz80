@@ -33,7 +33,7 @@ ifeq ($(ENABLE_SORDM5),1)
 SRCDIR += ./source/platform/sord_m5
 endif
 ifeq ($(ENABLE_ARCADE),1)
-SRCDIR += ./source/video/sega_system1 ./source/video/snk_ikari_psychos
+SRCDIR += ./source/video/sega_system1 ./source/video/snk_ikari_psychos ./source/video/taito_l
 else
 SRCDIR += ./source/platform/arcade_disabled
 endif
@@ -50,7 +50,7 @@ CFLAGS		+= -falign-functions=4 -falign-jumps=4 -falign-loops=4 -falign-labels=4 
 CFLAGS		+= -mno-fp-exceptions -mno-check-zero-division -fno-common -fno-short-enums -ffinite-math-only -funsafe-math-optimizations -fsection-anchors -fgcse-las -fgcse-sm
 CFLAGS		+= -DALIGN_DWORD -DNOBLANKING_LEFTCOLUM -DNONBLOCKING_AUDIO -DMULTIREXZ80_SCALE2X_TARGET_NATIVE
 CFLAGS		+= $(FEATURE_DEFS) -DLSB_FIRST
-CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/scalers -Isource/ports/$(PORT) -Isource/ports/sdl12_common -Isource/unzip -Isource/sdl -Isource/sound_output
+CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/video/taito_l -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/scalers -Isource/ports/$(PORT) -Isource/ports/sdl12_common -Isource/unzip -Isource/sdl -Isource/sound_output
 
 SRCDIR		+= ./source/text/fb
 CFLAGS		+= -Isource/text/fb

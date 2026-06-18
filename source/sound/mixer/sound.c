@@ -226,7 +226,7 @@ static void sound_generate_range(int32_t start, int32_t length)
 	fm[0]  = fm_buffer[0] + start;
 	fm[1]  = fm_buffer[1] + start;
 
-	if (sms.console != CONSOLE_SNKPSYCHOS)
+	if (sms.console != CONSOLE_SNKPSYCHOS && sms.console != CONSOLE_TAITOL)
 	{
 		psg_update_backend(0, psg, length);
 		if (systeme_dual_psg)
@@ -235,6 +235,8 @@ static void sound_generate_range(int32_t start, int32_t length)
 
 	if (sms.console == CONSOLE_SNKPSYCHOS)
 		snk_psychos_sound_update(fm, length);
+	else if (sms.console == CONSOLE_TAITOL)
+		taitol_sound_update(fm, length);
 	else if (sms.use_fm)
 		FM_Update(fm, length);
 }
@@ -319,6 +321,8 @@ uint32_t MULTIREXZ80_sound_init(void)
 		snd.mixer_callback = MULTIREXZ80_sound_mixer_callback;
 	if(sms.console == CONSOLE_SNKPSYCHOS)
 		snd.mixer_callback = MULTIREXZ80_snk_psychos_mixer_callback;
+	if (sms.console == CONSOLE_TAITOL)
+		snd.mixer_callback = MULTIREXZ80_taitol_mixer_callback;
 	snk_audio_filter_reset();
 
 	/* Calculate number of samples generated per frame */
@@ -398,6 +402,8 @@ uint32_t MULTIREXZ80_sound_init(void)
 	FM_Init();
 	if (sms.console == CONSOLE_SNKPSYCHOS)
 		snk_psychos_sound_reset();
+	if (sms.console == CONSOLE_TAITOL)
+		taitol_sound_reset();
 
 	/* Restore YM2413 register settings */
 	if(restore_sound)
@@ -476,6 +482,8 @@ void MULTIREXZ80_sound_reset(void)
 	FM_Reset();
 	if (sms.console == CONSOLE_SNKPSYCHOS)
 		snk_psychos_sound_reset();
+	if (sms.console == CONSOLE_TAITOL)
+		taitol_sound_reset();
 	snk_audio_filter_reset();
 }
 
@@ -562,6 +570,21 @@ void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length)
 		}
 
 		output[i * 2] = output[i * 2 + 1] = mix_saturate_i16(v);
+	}
+}
+
+void MULTIREXZ80_taitol_mixer_callback(int16_t *output, int32_t length)
+{
+	int32_t i;
+	int32_t level = option.soundlevel ? option.soundlevel : 1;
+	/* Taito L YM2203 produces left/right directly in fm_buffer[0]/[1].
+	 * No PSG bus is used. */
+	for(i = 0; i < length; i++)
+	{
+		int32_t l = (int32_t)fm_buffer[0][i];
+		int32_t r = (int32_t)fm_buffer[1][i];
+		output[i * 2]     = mix_saturate_i16(l * level);
+		output[i * 2 + 1] = mix_saturate_i16(r * level);
 	}
 }
 

@@ -160,6 +160,11 @@ static int y4m_open(multirexz80_headless_platform_t *p)
         p->video_w = SNK_PSYCHOS_VISIBLE_WIDTH;
         p->video_h = SNK_PSYCHOS_VISIBLE_HEIGHT;
     }
+    else if (sms.console == CONSOLE_TAITOL)
+    {
+        p->video_w = TAITOL_VISIBLE_WIDTH;
+        p->video_h = TAITOL_VISIBLE_HEIGHT;
+    }
     else
     {
         p->video_w = (sms.console == CONSOLE_GG && !option.extra_gg) ? 160u : 256u;
@@ -231,7 +236,7 @@ static int dump_state(const char *prefix)
     if (!write_file_bytes(path, vdp.cram, sizeof(vdp.cram))) return 0;
     snprintf(path, sizeof(path), "%s_vdp_regs.bin", prefix);
     if (!write_file_bytes(path, vdp.reg, sizeof(vdp.reg))) return 0;
-    if (sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS)
+    if (sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS || sms.console == CONSOLE_TAITOL)
     {
         snprintf(path, sizeof(path), "%s_vdp2_vram.bin", prefix);
         if (!write_file_bytes(path, vdp2.vram, sizeof(vdp2.vram))) return 0;

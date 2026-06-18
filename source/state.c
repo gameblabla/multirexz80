@@ -52,6 +52,7 @@
 #define STATE_RAW_CHUNK_MAGIC "SPGXRAW1"
 #define STATE_RAW_CHUNK_MAGIC_LEN 8
 #define STATE_RAW_CHUNK_SNK 0x314b4e53u /* SNK1, little-endian. */
+#define STATE_RAW_CHUNK_TAITOL 0x4c4f5449u /* ITOL, little-endian (Taito L). */
 
 typedef struct
 {
@@ -126,6 +127,9 @@ static void state_load_raw_chunks(FILE *fd)
         if (chunk.id == STATE_RAW_CHUNK_SNK && sms.console == CONSOLE_SNKPSYCHOS)
             (void)snk_psychos_load_state(fd, chunk.size);
 
+        if (chunk.id == STATE_RAW_CHUNK_TAITOL && sms.console == CONSOLE_TAITOL)
+            (void)taitol_load_state(fd, chunk.size);
+
         if (fseek(fd, payload_pos + (long)chunk.size, SEEK_SET) != 0)
             break;
     }
@@ -153,6 +157,9 @@ uint32_t system_save_state(FILE* fd)
 
     if (sms.console == CONSOLE_SNKPSYCHOS)
         state_write_raw_chunk(fd, STATE_RAW_CHUNK_SNK, snk_psychos_state_size(), snk_psychos_save_state);
+
+    if (sms.console == CONSOLE_TAITOL)
+        state_write_raw_chunk(fd, STATE_RAW_CHUNK_TAITOL, taitol_state_size(), taitol_save_state);
 
     return 0;
 }

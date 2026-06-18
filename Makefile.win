@@ -66,7 +66,7 @@ ifeq ($(ENABLE_SORDM5),1)
 CORE_DIRS += source/platform/sord_m5
 endif
 ifeq ($(ENABLE_ARCADE),1)
-CORE_DIRS += source/video/sega_system1 source/video/snk_ikari_psychos
+CORE_DIRS += source/video/sega_system1 source/video/snk_ikari_psychos source/video/taito_l
 else
 CORE_DIRS += source/platform/arcade_disabled
 endif
@@ -86,7 +86,7 @@ RES32 := $(BUILD32)/source/ports/win32/multirexz80_win32.res.o
 # silently froze ROM/ZIP loading at 99% CPU (e.g. zip_path_stem_ieq during
 # arcade-set detection).  Rely on the native MinGW declarations instead.
 COMMON_DEFS := -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_WIN32 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS) $(STATIC_DEFS)
-PROJECT_INC_DIRS := source source/other/eeprom/93c46 source/other/decode source/platform/coleco source/platform/sord_m5 source/video/sms_vdp source/video/tms9918 source/video/sega_system1 source/video/snk_ikari_psychos source/sound/mixer source/sound/opll source/opl1 source/sound/opl1 source/sound/psg/$(PSG_ENGINE) source/cpu_cores/$(Z80_CORE) source/ports/win32 source/sound_output source/unzip
+PROJECT_INC_DIRS := source source/other/eeprom/93c46 source/other/decode source/platform/coleco source/platform/sord_m5 source/video/sms_vdp source/video/tms9918 source/video/sega_system1 source/video/snk_ikari_psychos source/video/taito_l source/sound/mixer source/sound/opll source/opl1 source/sound/opl1 source/sound/psg/$(PSG_ENGINE) source/cpu_cores/$(Z80_CORE) source/ports/win32 source/sound_output source/unzip
 # Use -iquote rather than -I for project headers so MinGW's own system headers
 # (notably <basetsd.h>) cannot be shadowed by files under source/.
 COMMON_INC := $(addprefix -iquote ,$(PROJECT_INC_DIRS))
@@ -153,11 +153,11 @@ $(TARGET32): $(OBJ32) $(RES32)
 
 $(BUILD64)/%.o: %.c Makefile.win | $(SDL_DEP)
 	@mkdir -p $(dir $@)
-	$(CC64) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(SDL_CFLAGS) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
+	$(CC64) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(SDL_CFLAGS) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/taito_l.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
 
 $(BUILD32)/%.o: %.c Makefile.win
 	@mkdir -p $(dir $@)
-	$(CC32) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
+	$(CC32) $(CFLAGS) $(COMMON_DEFS) $(COMMON_INC) $(if $(filter %/z80.o %/system1.o %/snk_psychos.o %/taito_l.o %/sound.o,$@),$(HOT_CFLAGS),) $(if $(filter %/opl.o %/mame_fmopl.o %/mame_ymdeltat.o %/crab_ym2413.o,$@),$(OPL_CFLAGS),) -c -o $@ $<
 
 $(RES64): source/ports/win32/multirexz80_win32.rc resources/sms.ico Makefile.win
 	@mkdir -p $(dir $@)

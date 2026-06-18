@@ -79,5 +79,6 @@ void MULTIREXZ80_sound_update(int32_t line);
 void MULTIREXZ80_sound_sync_to_cpu(void);
 void MULTIREXZ80_sound_mixer_callback(int16_t *output, int32_t length);
 void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length);
+void MULTIREXZ80_taitol_mixer_callback(int16_t *output, int32_t length);
 
 #endif /* SOUND_H_ */

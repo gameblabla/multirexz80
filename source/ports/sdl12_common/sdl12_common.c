@@ -97,7 +97,7 @@ void multirexz80_sdl12_keymap_defaults(multirexz80_sdl12_keymap_t *map)
 
 int multirexz80_sdl12_arcade_active(void)
 {
-    return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS;
+    return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS || sms.console == CONSOLE_TAITOL;
 }
 
 int multirexz80_sdl12_keyboard_active(void)

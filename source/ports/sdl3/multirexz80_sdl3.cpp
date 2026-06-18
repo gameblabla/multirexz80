@@ -631,6 +631,7 @@ static constexpr ConsoleChoice kConsoleChoices[] = {
     {"Sega System E", "systeme", 8, 0},
     {"Sega System 1/2", "system1", 9, 0},
     {"SNK Ikari/Psychos", "snk", 10, 0},
+    {"Taito L", "taitol", 11, 0},
 };
 
 static constexpr const char *kVideoModeLabels[] = {
@@ -660,6 +661,7 @@ static const char *runtime_console_name(uint8_t console)
         case CONSOLE_SYSTEME: return "Sega System E";
         case CONSOLE_SYSTEM1: return "Sega System 1/2";
         case CONSOLE_SNKPSYCHOS: return "SNK Ikari/Psychos";
+        case CONSOLE_TAITOL: return "Taito L";
         default: return "Unknown";
     }
 }
@@ -817,6 +819,7 @@ static int console_choice_from_name(const char *name)
     if (!SDL_strcasecmp(name, "systeme") || !SDL_strcasecmp(name, "segae")) return 9;
     if (!SDL_strcasecmp(name, "system1") || !SDL_strcasecmp(name, "segas1") || !SDL_strcasecmp(name, "sega1") || !SDL_strcasecmp(name, "system2")) return 10;
     if (!SDL_strcasecmp(name, "psychos") || !SDL_strcasecmp(name, "snkpsychos") || !SDL_strcasecmp(name, "ikari")) return 11;
+    if (!SDL_strcasecmp(name, "taitol") || !SDL_strcasecmp(name, "taito")) return 12;
     if (!SDL_strcasecmp(name, "coleco") || !SDL_strcasecmp(name, "colecovision") || !SDL_strcasecmp(name, "cv")) return 1;
     if (!SDL_strcasecmp(name, "ggms") || !SDL_strcasecmp(name, "ggsms")) return 8;
     if (!SDL_strcasecmp(name, "gg")) return 7;
@@ -1698,7 +1701,7 @@ static void m5_key_from_text(const char *txt)
 
 static bool arcade_machine_active()
 {
-    return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS;
+    return sms.console == CONSOLE_SYSTEME || sms.console == CONSOLE_SYSTEM1 || sms.console == CONSOLE_SNKPSYCHOS || sms.console == CONSOLE_TAITOL;
 }
 
 static bool keyboard_scancode_down(const bool *state, int nkeys, SDL_Scancode sc);

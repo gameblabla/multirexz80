@@ -37,7 +37,7 @@ ifeq ($(ENABLE_SORDM5),1)
 SRCDIR += ./source/platform/sord_m5
 endif
 ifeq ($(ENABLE_ARCADE),1)
-SRCDIR += ./source/video/sega_system1 ./source/video/snk_ikari_psychos
+SRCDIR += ./source/video/sega_system1 ./source/video/snk_ikari_psychos ./source/video/taito_l
 else
 SRCDIR += ./source/platform/arcade_disabled
 endif
@@ -57,7 +57,7 @@ endif
 ifeq ($(GPROF),1)
 CFLAGS      += -pg -fno-omit-frame-pointer
 endif
-CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/headless -Isource/sound_output -Isource/unzip
+CFLAGS += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/video/taito_l -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/headless -Isource/sound_output -Isource/unzip
 ifeq ($(PROFILE),YES)
 CFLAGS      += -fprofile-generate=$(PROFILE_DIR)
 else ifeq ($(PROFILE),APPLY)
@@ -79,7 +79,7 @@ $(PRGNAME): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PRGNAME) $^ $(LDFLAGS)
 
 opl.o mame_fmopl.o mame_ymdeltat.o crab_ym2413.o: CFLAGS += $(OPL_CFLAGS)
-z80.o system1.o snk_psychos.o sound.o: CFLAGS += $(HOT_CFLAGS)
+z80.o system1.o snk_psychos.o taito_l.o sound.o: CFLAGS += $(HOT_CFLAGS)
 
 
 # Force object rebuilds when this makefile changes. This prevents stale .o

@@ -44,7 +44,7 @@ ifeq ($(ENABLE_SORDM5),1)
 CORE_DIRS += ./source/platform/sord_m5
 endif
 ifeq ($(ENABLE_ARCADE),1)
-CORE_DIRS += ./source/video/sega_system1 ./source/video/snk_ikari_psychos
+CORE_DIRS += ./source/video/sega_system1 ./source/video/snk_ikari_psychos ./source/video/taito_l
 else
 CORE_DIRS += ./source/platform/arcade_disabled
 endif
@@ -75,7 +75,7 @@ SDL3_CFLAGS := $(shell pkg-config --cflags sdl3 2>/dev/null)
 SDL3_LIBS   := $(shell pkg-config --libs sdl3 2>/dev/null)
 
 COMMON_DEFS  = -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_SDL3 $(ZIP_DEFS) $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS) $(STATIC_DEFS)
-COMMON_INC = -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/sdl3 -Isource/sound_output -Isource/unzip
+COMMON_INC = -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/video/taito_l -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/sdl3 -Isource/sound_output -Isource/unzip
 IMGUI_INC    = -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
 PROFILE_CFLAGS :=
 ifeq ($(PROFILE),YES)
