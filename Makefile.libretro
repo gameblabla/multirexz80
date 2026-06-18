@@ -1,0 +1,92 @@
+# Makefile.libretro - MultiRexZ80 libretro core
+#
+# Builds a libretro shared object (multirexz80_libretro.so) exposing the
+# MultiRexZ80 core to RetroArch and other libretro frontends.  The shared
+# object is the only artifact; the host port code lives in
+# source/ports/libretro/libretro_core.c.
+
+PRGNAME     = multirexz80_libretro
+PLATFORM    ?= unix
+CC          ?= gcc
+CXX         ?= g++
+
+PSG_ENGINE  ?= mame_sn76489
+ifneq ($(origin SOUND_ENGINE), undefined)
+PSG_ENGINE := $(SOUND_ENGINE)
+endif
+Z80_CORE    ?= z80
+RENDER_BPP  ?= 32
+ENABLE_ARCADE ?= 1
+ENABLE_COLECO ?= 1
+ENABLE_SORDM5 ?= 1
+
+PSG_DEFS    :=
+RENDER_DEFS :=
+FEATURE_DEFS := -DMULTIREXZ80_ENABLE_ARCADE=$(ENABLE_ARCADE) -DMULTIREXZ80_ENABLE_COLECO=$(ENABLE_COLECO) -DMULTIREXZ80_ENABLE_SORDM5=$(ENABLE_SORDM5)
+
+ifeq ($(PSG_ENGINE),mame_sn76489)
+PSG_DEFS += -DMAME_PSG
+endif
+
+ifeq ($(RENDER_BPP),32)
+RENDER_DEFS += -DMULTIREXZ80_RENDER_32BPP
+endif
+
+SRCDIR = ./source ./source/other/eeprom/93c46 ./source/other/decode ./source/video/sms_vdp ./source/video/tms9918 ./source/sound/mixer ./source/sound/opll ./source/sound/opl1 ./source/cpu_cores/$(Z80_CORE) ./source/sound/psg/$(PSG_ENGINE) ./source/ports/libretro
+
+ifeq ($(ENABLE_COLECO),1)
+SRCDIR += ./source/platform/coleco
+endif
+ifeq ($(ENABLE_SORDM5),1)
+SRCDIR += ./source/platform/sord_m5
+endif
+ifeq ($(ENABLE_ARCADE),1)
+SRCDIR += ./source/video/sega_system1 ./source/video/snk_ikari_psychos ./source/video/taito_l
+else
+SRCDIR += ./source/platform/arcade_disabled
+endif
+
+VPATH       = $(SRCDIR) ./source/unzip
+SRC_C       = $(foreach dir, $(SRCDIR), $(wildcard $(dir)/*.c)) ./source/unzip/miniz.c ./source/unzip/fileio.c ./source/unzip/ioapi.c ./source/unzip/unzip.c
+OBJ_C       = $(notdir $(patsubst %.c, %.o, $(SRC_C)))
+OBJS        = $(OBJ_C)
+
+CFLAGS      = -O2 -g -Wall -Wextra -std=gnu99 -fPIC
+CFLAGS      += -DLSB_FIRST -DALIGN_DWORD -DNOYUV -DMULTIREXZ80_LIBRETRO $(PSG_DEFS) $(RENDER_DEFS) $(FEATURE_DEFS)
+CFLAGS      += -Isource -Isource/other/eeprom/93c46 -Isource/other/decode -Isource/platform/coleco -Isource/platform/sord_m5 -Isource/video/sms_vdp -Isource/video/tms9918 -Isource/video/sega_system1 -Isource/video/snk_ikari_psychos -Isource/video/taito_l -Isource/sound/mixer -Isource/sound/opll -Isource/sound/opl1 -Isource/sound/psg/$(PSG_ENGINE) -Isource/cpu_cores/$(Z80_CORE) -Isource/ports/libretro -Isource/sound_output -Isource/unzip
+
+OPL_CFLAGS  = -O3 -g -fno-stack-protector -DNDEBUG
+HOT_CFLAGS  = -O3 -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+
+# Platform-specific linker flags
+ifeq ($(PLATFORM),unix)
+LDFLAGS     = -shared -Wl,--no-undefined -lm
+TARGET      = $(PRGNAME).so
+else ifeq ($(PLATFORM),osx)
+LDFLAGS     = -dynamiclib -lm
+TARGET      = $(PRGNAME).dylib
+else ifeq ($(PLATFORM),win)
+CFLAGS      += -DHAVE_STDINT_H
+LDFLAGS     = -shared -static-libgcc -static-libstdc++ -lm
+TARGET      = $(PRGNAME).dll
+else
+LDFLAGS     = -shared -lm
+TARGET      = $(PRGNAME).so
+endif
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $^ $(LDFLAGS)
+
+opl.o mame_fmopl.o mame_ymdeltat.o crab_ym2413.o: CFLAGS += $(OPL_CFLAGS)
+z80.o system1.o snk_psychos.o taito_l.o sound.o: CFLAGS += $(HOT_CFLAGS)
+
+# Force object rebuilds when this makefile changes.
+$(OBJS): Makefile.libretro
+
+$(OBJ_C) : %.o : %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(TARGET) *.o
+
+.PHONY: clean
