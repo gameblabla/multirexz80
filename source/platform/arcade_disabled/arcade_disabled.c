@@ -88,6 +88,7 @@ void taitol_port_w(uint16_t port, uint8_t data) { (void)port; (void)data; }
 void taitol_reset(void) { }
 void taitol_frame(uint32_t skip_render) { (void)skip_render; }
 int32_t taitol_irq_callback(int32_t param) { (void)param; return 0xff; }
+int taitol_needs_rotation(void) { return 0; }
 void taitol_sound_reset(void) { }
 void taitol_sound_update(int16_t **buffer, int32_t length) { (void)buffer; (void)length; }
 int taitol_audio_mixer_gain_num(int headroom_db) { (void)headroom_db; return 384; }

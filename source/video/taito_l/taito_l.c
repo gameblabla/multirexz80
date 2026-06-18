@@ -322,7 +322,8 @@ static int taitol_gfx_pixel(const uint8_t *rom, uint32_t size, int is16,
     {
         uint32_t bit_index = base + (uint32_t)yo[y] + (uint32_t)xo[x] + (uint32_t)gfx_plane_offset[p];
         uint32_t byte_index = bit_index >> 3;
-        int bit = (int)(bit_index & 7);
+        /* MAME uses MSB-first bit ordering: 0x80 >> (bitoffset % 8) */
+        int bit = 7 - (int)(bit_index & 7);
         if (byte_index < size)
             pixel |= ((rom[byte_index] >> bit) & 1) << p;
     }
@@ -371,7 +372,8 @@ static void taitol_decode_vram_tiles(void)
                                          (uint32_t)gfx_x_offset_8[x] +
                                          (uint32_t)gfx_plane_offset[p];
                     uint32_t byte_index = bit_index >> 3;
-                    int bit = (int)(bit_index & 7);
+                    /* MAME uses MSB-first bit ordering */
+                    int bit = 7 - (int)(bit_index & 7);
                     if (byte_index < TAITOL_VRAM_SIZE)
                         pixel |= ((tl.vram[byte_index] >> bit) & 1) << p;
                 }
@@ -704,6 +706,10 @@ static void taitol_draw_tile_8x8(uint32_t *dst, int pitch, uint32_t tile_code,
     }
 }
 
+/* Draw a 16x16 sprite tile.  In MAME, sprites use gfx(1) which is the
+ * 16x16 layout.  The sprite code from sprite RAM is used directly as
+ * the 16x16 tile index (the <<= 2 / >>= 2 in MAME is only for the
+ * tile callback and nets to no change when no callback modifies it). */
 static void taitol_draw_sprite(uint32_t *dst, int pitch, uint32_t code,
                                int palette, int flipx, int flipy,
                                int x, int y, int clip_minx, int clip_maxx,
@@ -711,10 +717,6 @@ static void taitol_draw_sprite(uint32_t *dst, int pitch, uint32_t code,
 {
     const uint8_t *src;
     int sx, sy, dx, dy;
-    /* Sprites are 16x16 made of 4 8x8 quadrants.  The sprite code is the
-     * 16x16 tile index << 2 in MAME's sprite format; we use the decoded
-     * 16x16 gfx directly. */
-    code >>= 2;
     if (code >= TAITOL_GFX16_MAX) code %= TAITOL_GFX16_MAX;
     src = tl.gfx16_dec + code * 256;
     for (sy = 0; sy < 16; sy++)
@@ -733,6 +735,61 @@ static void taitol_draw_sprite(uint32_t *dst, int pitch, uint32_t code,
     }
 }
 
+/* Render one BG tilemap layer into the destination bitmap.
+ * Uses a pixel-based approach matching MAME's tilemap drawing:
+ * For each screen pixel (sx, sy) in the visible area:
+ *   tilemap_x = (sx - xoffs + scrollx) % 512
+ *   tilemap_y = (sy + VISIBLE_Y - yoffs + scrolly) % 256
+ *   tile = tilemap[tilemap_y/8 * 64 + tilemap_x/8]
+ *   pen = gfx_decode(tile, tilemap_x%8, tilemap_y%8) */
+static void taitol_draw_bg_layer(uint32_t *dst, int pitch, int layer,
+                                 int scrollx, int scrolly, int xoffs,
+                                 int opaque, int flip,
+                                 int clip_minx, int clip_maxx,
+                                 int clip_miny, int clip_maxy)
+{
+    int base = (layer == 0) ? 0x8000 : 0x9000;
+    int sx, sy;
+    /* MAME: set_scrollx(0, -dx) → effective scroll = -dx
+     *       screen_x = tilemap_x + scroll + xoffs
+     *       tilemap_x = screen_x - scroll - xoffs = screen_x + dx - xoffs */
+    int tm_x_base = scrollx - xoffs;
+    int tm_y_base = scrolly;  /* scrolly = -dy in MAME, so tilemap_y = screen_y + dy = screen_y + scrolly */
+    (void)flip; /* flip is handled at the pixel level via global_flip in the caller */
+
+    for (sy = clip_miny; sy <= clip_maxy; sy++)
+    {
+        int screen_y = sy + TAITOL_VISIBLE_Y;
+        int tm_y = (screen_y + tm_y_base) % 256;
+        if (tm_y < 0) tm_y += 256;
+        int tile_row = tm_y / 8;
+        int pix_y = tm_y % 8;
+        int row_off = base + (tile_row * 64) * 2;
+        uint32_t *dst_line = dst + sy * pitch;
+
+        for (sx = clip_minx; sx <= clip_maxx; sx++)
+        {
+            int tm_x = (sx + tm_x_base) % 512;
+            if (tm_x < 0) tm_x += 512;
+            int tile_col = tm_x / 8;
+            int pix_x = tm_x % 8;
+            int taddr = row_off + tile_col * 2;
+            uint8_t code_lo = tl.vram[taddr];
+            uint8_t attr = tl.vram[taddr + 1];
+            uint32_t code = (uint32_t)code_lo | (((uint32_t)(attr & 0x03)) << 8);
+            code |= (uint32_t)tl_tilebank((attr >> 2) & 3) << 10;
+            int pal = (attr >> 4) & 0x0f;
+
+            if (code >= TAITOL_GFX8_MAX) code %= TAITOL_GFX8_MAX;
+            {
+                uint8_t pen = tl.gfx8_dec[code * 64 + pix_y * 8 + pix_x];
+                if (!opaque && pen == 0) continue;
+                dst_line[sx] = tl.palette[(pal & 0x0f) * 16 + pen];
+            }
+        }
+    }
+}
+
 static void taitol_render(void)
 {
     uint32_t *dst = (uint32_t *)bitmap.data;
@@ -741,9 +798,25 @@ static void taitol_render(void)
     int miny = 0, maxy = (int)TAITOL_VISIBLE_HEIGHT - 1;
     int x, y;
     int flip = tl_global_flip();
+    /* Scroll values: MAME reads from &m_vram[0xb000] (live VRAM).
+     * Scroll registers are at offsets 0x3f4-0x3f6 (BG0) and 0x3fc-0x3fe (BG1)
+     * within the 0xb000 sprite/scroll block. */
+    int bg0_dx = (int)(tl.vram[0xb3f4] | (tl.vram[0xb3f5] << 8));
+    int bg0_dy = (int)tl.vram[0xb3f6];
+    int bg1_dx = (int)(tl.vram[0xb3fc] | (tl.vram[0xb3fd] << 8));
+    int bg1_dy = (int)tl.vram[0xb3fe];
 
+    if (flip)
+    {
+        /* MAME: dx = ((dx & 0xfffc) | ((dx - 3) & 0x0003)) ^ 0xf; */
+        bg0_dx = ((bg0_dx & 0xfffc) | ((bg0_dx - 3) & 0x0003)) ^ 0xf;
+        bg1_dx = ((bg1_dx & 0xfffc) | ((bg1_dx - 3) & 0x0003)) ^ 0xf;
+    }
+
+    taitol_decode_gfx();
     taitol_decode_vram_tiles();
     taitol_update_palette();
+
     if (!tl_screen_enable())
     {
         for (y = 0; y < TAITOL_VISIBLE_HEIGHT; y++)
@@ -751,16 +824,19 @@ static void taitol_render(void)
                 dst[y * pitch + x] = 0;
         return;
     }
+
     if (tl_bitmap_mode())
     {
+        /* 8bpp bitmap mode - MAME: res_y = global_flip ? 256-y : y */
         for (y = 0; y < TAITOL_VISIBLE_HEIGHT; y++)
         {
-            int ry = flip ? (256 - (TAITOL_VISIBLE_Y + y)) : (TAITOL_VISIBLE_Y + y);
-            uint32_t count = (uint32_t)(ry & 0xff) * 512u;
+            int screen_y = y + TAITOL_VISIBLE_Y;
+            int res_y = flip ? (256 - screen_y) : screen_y;
+            uint32_t count = (uint32_t)(res_y & 0xff) * 512u;
             for (x = 0; x < TAITOL_VISIBLE_WIDTH; x++)
             {
-                int rx = flip ? (TAITOL_VISIBLE_X + TAITOL_VISIBLE_WIDTH - 1 - x) : (TAITOL_VISIBLE_X + x);
-                dst[y * pitch + x] = tl.palette[tl.bitmap_ram[count + (rx & 0x1ff)] & 0xff];
+                int res_x = flip ? (TAITOL_VISIBLE_WIDTH - 1 - x) : x;
+                dst[y * pitch + x] = tl.palette[tl.bitmap_ram[count + (res_x & 0x1ff)] & 0xff];
             }
         }
         return;
@@ -771,71 +847,53 @@ static void taitol_render(void)
         for (x = 0; x < TAITOL_VISIBLE_WIDTH; x++)
             dst[y * pitch + x] = tl.palette[0];
 
-    /* BG1 (opaque), BG0 (priority-dependent), sprites, TX. */
-    {
-        int layer;
-        /* Scroll registers live in the sprite RAM buffer at 0x3f4-0x3f6 (BG0)
-         * and 0x3fc-0x3fe (BG1). */
-        int bg0_sx = (int)(tl.sprram_buf[0x3f4] | (tl.sprram_buf[0x3f5] << 8));
-        int bg0_sy = (int)tl.sprram_buf[0x3f6];
-        int bg1_sx = (int)(tl.sprram_buf[0x3fc] | (tl.sprram_buf[0x3fd] << 8));
-        int bg1_sy = (int)tl.sprram_buf[0x3fe];
-        for (layer = 1; layer >= 0; layer--)
-        {
-            int base = (layer == 0) ? 0x8000 : 0x9000;
-            int sx = (layer == 0) ? bg0_sx : bg1_sx;
-            int sy = (layer == 0) ? bg0_sy : bg1_sy;
-            int opaque = (layer == 1);  /* BG1 drawn opaque */
-            int row, col;
-            for (row = 0; row < 32; row++)
-            {
-                for (col = 0; col < 64; col++)
-                {
-                    int taddr = base + (row * 64 + col) * 2;
-                    uint8_t code_lo = tl.vram[taddr];
-                    uint8_t attr = tl.vram[taddr + 1];
-                    uint32_t code = (uint32_t)code_lo | (((uint32_t)(attr & 0x03)) << 8);
-                    code |= (uint32_t)tl_tilebank((attr >> 2) & 3) << 10;
-                    int pal = (attr >> 4) & 0x0f;
-                    int dx = (col * 8 - sx + 28 + 64 * 8) % (64 * 8); /* rough wrap */
-                    int dy = (row * 8 - sy + 32 * 8) % (32 * 8);
-                    /* Only draw if within visible window. */
-                    if (dx >= 0 && dx < TAITOL_VISIBLE_WIDTH &&
-                        dy >= 0 && dy < TAITOL_VISIBLE_HEIGHT)
-                    {
-                        taitol_draw_tile_8x8(dst, pitch, code, pal, 0, 0,
-                                            dx, dy, minx, maxx, miny, maxy,
-                                            !opaque);
-                    }
-                }
-            }
-        }
-    }
+    /* BG1 (opaque) - MAME: m_bg_tilemap[1]->draw(OPAQUE)
+     * scrolldx(38, -21), scrolldy(0, 0) */
+    taitol_draw_bg_layer(dst, pitch, 1, bg1_dx, bg1_dy,
+                         flip ? -21 : 38, 1, flip, minx, maxx, miny, maxy);
 
-    /* Sprites. */
+    /* BG0 (priority-dependent) - MAME: m_bg_tilemap[0]->draw(0, bg0_pri() ? 0 : 1)
+     * scrolldx(28, -11), scrolldy(0, 0) */
+    taitol_draw_bg_layer(dst, pitch, 0, bg0_dx, bg0_dy,
+                         flip ? -11 : 28, 0, flip, minx, maxx, miny, maxy);
+
+    /* Sprites. MAME reads from m_sprram_buffer (double-buffered at VBlank). */
     {
         int i;
         for (i = 0; i < 0x3e7; i += 8)
         {
             uint32_t code = (uint32_t)tl.sprram_buf[i] | ((uint32_t)tl.sprram_buf[i + 1] << 8);
             int col = tl.sprram_buf[i + 2] & 0x0f;
-            int fx = tl.sprram_buf[i + 3] & 1;
-            int fy = (tl.sprram_buf[i + 3] >> 1) & 1;
-            int x = tl.sprram_buf[i + 4] | ((tl.sprram_buf[i + 5] & 1) << 8);
-            int y = tl.sprram_buf[i + 6];
-            if (x >= TAITOL_VISIBLE_WIDTH) x -= 512;
-            if (y >= TAITOL_VISIBLE_HEIGHT) y -= 256;
-            if (flip) { x = 304 - x; y = 240 - y; fx = !fx; fy = !fy; }
-            taitol_draw_sprite(dst, pitch, code, col, fx, fy, x, y,
-                               minx, maxx, miny, maxy);
+            int fx = tl.sprram_buf[i + 3] & 0x1;
+            int fy = (tl.sprram_buf[i + 3] >> 1) & 0x1;
+            /* MAME: x and y are screen coordinates. cliprect.max_x = 319, max_y = 239 */
+            int sx = tl.sprram_buf[i + 4] | ((tl.sprram_buf[i + 5] & 1) << 8);
+            int sy = tl.sprram_buf[i + 6];
+            if (sx >= 320) sx -= 512;
+            if (sy >= 240) sy -= 256;
+            if (flip)
+            {
+                sx = 304 - sx;
+                sy = 240 - sy;
+                fx = !fx;
+                fy = !fy;
+            }
+            /* Convert to bitmap coordinates (visible area starts at y=16) */
+            sy -= TAITOL_VISIBLE_Y;
+            taitol_draw_sprite(dst, pitch, code, col, fx, fy,
+                              sx, sy, minx, maxx, miny, maxy);
         }
     }
 
-    /* TX (text) layer - uses VRAM-decoded tiles, transparent pen 0. */
+    /* TX (text) layer - MAME: scrolldx(-8, -8), scrolldy(0, 0), scroll(0, 0)
+     * Tilemap is 64x32 tiles.  Screen position: col*8 + (-8), row*8 + 0.
+     * Visible area: y=16..239 → bitmap_y = row*8 - 16. */
     {
         int row, col;
         for (row = 0; row < 32; row++)
         {
+            int bitmap_y = row * 8 - TAITOL_VISIBLE_Y;
+            if (bitmap_y + 8 <= miny || bitmap_y > maxy) continue;
             for (col = 0; col < 64; col++)
             {
                 int taddr = 0xa000 + (row * 64 + col) * 2;
@@ -844,34 +902,36 @@ static void taitol_render(void)
                 uint32_t code = (uint32_t)code_lo | (((uint32_t)(attr & 0x07)) << 8);
                 int pal = (attr >> 4) & 0x0f;
                 const uint8_t *src;
-                int dx, dy;
+                int bitmap_x = col * 8 - 8;
+                int x_, y_;
+                if (bitmap_x + 8 <= minx || bitmap_x > maxx) continue;
                 if (code >= TAITOL_VRAM_TILES) code %= TAITOL_VRAM_TILES;
                 src = tl.vram_dec + code * 64;
-                dx = col * 8 - 8;
-                dy = row * 8 - 16;
-                if (dx < 0 || dx >= TAITOL_VISIBLE_WIDTH) continue;
-                if (dy < 0 || dy >= TAITOL_VISIBLE_HEIGHT) continue;
+                for (y_ = 0; y_ < 8; y_++)
                 {
-                    int x_, y_;
-                    for (y_ = 0; y_ < 8; y_++)
+                    int py = bitmap_y + y_;
+                    if (py < miny || py > maxy) continue;
+                    for (x_ = 0; x_ < 8; x_++)
                     {
-                        int py = dy + y_;
-                        if (py < 0 || py >= TAITOL_VISIBLE_HEIGHT) continue;
-                        for (x_ = 0; x_ < 8; x_++)
-                        {
-                            int px = dx + x_;
-                            uint8_t pen;
-                            if (px < 0 || px >= TAITOL_VISIBLE_WIDTH) continue;
-                            pen = src[y_ * 8 + x_];
-                            if (pen == 0) continue;
-                            dst[py * pitch + px] = tl.palette[(pal & 0x0f) * 16 + pen];
-                        }
+                        int px = bitmap_x + x_;
+                        uint8_t pen;
+                        if (px < minx || px > maxx) continue;
+                        pen = src[y_ * 8 + x_];
+                        if (pen == 0) continue;
+                        dst[py * pitch + px] = tl.palette[(pal & 0x0f) * 16 + pen];
                     }
                 }
             }
         }
     }
+
     bitmap.viewport.changed = 1;
+}
+
+/* Return whether the current game uses ROT270 orientation. */
+int taitol_needs_rotation(void)
+{
+    return tl.rotate;
 }
 
 /* ---- Sound ------------------------------------------------------------ */
