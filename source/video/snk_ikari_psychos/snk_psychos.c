@@ -206,12 +206,10 @@ static int snk_uses_two_ym3526(void)
 
 int snk_psychos_audio_mixer_gain_num(int headroom_db)
 {
-    /* MAME routes both of Psycho Soldier's OPL devices at 2.0.  Do not group
-     * it with Chopper: that board replaces its first chip with a YM3812 at a
-     * lower route gain.  Doing so reduced Psycho Soldier to 0.75x here and
-     * made its already quiet attract-mode audio effectively inaudible in the
-     * SDL3 frontend.  The mixer denominator is 512, so 1024 represents the
-     * 2.0 route used by Psycho Soldier and the other full-gain SNK boards. */
+    /* The imported OPL core produces Psycho Soldier at roughly 18 dB below a
+     * useful SDL playback level even after applying the PCB's 2.0 routes.
+     * Normalize that game here, before the optional headroom and limiter, so
+     * it is audible without raising every other emulated system. */
     int base;
     switch (snk.game_type)
     {
@@ -221,6 +219,9 @@ int snk_psychos_audio_mixer_gain_num(int headroom_db)
         case SNK_GAME_CHOPPER:
             /* Preserve the board-specific balance calibrated for Chopper. */
             base = 384;
+            break;
+        case SNK_GAME_PSYCHOS:
+            base = 8192;
             break;
         default:
             base = 1024;
