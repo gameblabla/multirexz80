@@ -121,6 +121,7 @@ void     taitol_set_game_variant(int variant);
 uint8_t *taitol_main_rom_ptr(void);
 uint8_t *taitol_gfx_rom_ptr(void);
 void     taitol_invalidate_gfx(void);
+void     taitol_note_gfx_region_size(uint32_t size);
 
 void     taitol_memory_map(int clear_ram);
 uint8_t  taitol_readmem(uint16_t address);

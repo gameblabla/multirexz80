@@ -2517,7 +2517,10 @@ static int load_zip_member_to_taitol(unzFile zhandle, const taitol_zip_file_t *f
                 }
                 ok = 1;
                 if (file->region == TAITOL_REGION_GFX)
+                {
+                    taitol_note_gfx_region_size(max_off + 1u);
                     taitol_invalidate_gfx();
+                }
             }
         }
     }
