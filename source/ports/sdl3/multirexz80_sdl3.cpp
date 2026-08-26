@@ -319,6 +319,7 @@ struct AppState
     SDL_Renderer *renderer = nullptr;
     SDL_Texture *texture = nullptr;
     SDL_AudioStream *audio_stream = nullptr;
+    bool audio_device_started = false;
     SDL_Gamepad *gamepad = nullptr;
     UiSettings ui;
     std::string rom_path;
@@ -386,7 +387,6 @@ struct AppState
     bool audio_drop_stale = true;
     int audio_latency_frames = 8;
     int audio_device_sample_frames = 768;
-    uint64_t audio_drop_count = 0;
     uint64_t audio_backpressure_count = 0;
     std::string audio_dump_path;
     std::FILE *audio_dump_file = nullptr;
@@ -490,7 +490,11 @@ static void sdl3_audio_dump_close(AppState &app)
 static void sdl3_clear_audio_queue(AppState &app)
 {
     if (app.audio_stream)
+    {
+        SDL_PauseAudioStreamDevice(app.audio_stream);
         SDL_ClearAudioStream(app.audio_stream);
+        app.audio_device_started = false;
+    }
 }
 
 static void sdl3_queue_audio_frame(AppState &app)
@@ -522,16 +526,30 @@ static void sdl3_queue_audio_frame(AppState &app)
                 queued = SDL_GetAudioStreamQueued(app.audio_stream);
             } while (queued > target_queued && SDL_GetTicksNS() - start < max_wait_ns);
 
-            if (queued >= max_queued * 2)
-            {
-                app.audio_drop_count++;
-                return;
-            }
+            /* Never discard a complete emulated frame.  A dropped block joins
+             * unrelated waveform endpoints and is heard as a crackle.  If the
+             * device did not drain within the short backpressure window, keep
+             * the data and tolerate temporary extra latency instead. */
         }
     }
 
     sdl3_audio_dump_frame(app, snd.output, bytes);
-    SDL_PutAudioStreamData(app.audio_stream, snd.output, bytes);
+    if (!SDL_PutAudioStreamData(app.audio_stream, snd.output, bytes))
+    {
+        std::fprintf(stderr, "SDL audio queue failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    /* OpenAudioDeviceStream starts paused.  Prebuffer two complete emulated
+     * frames before the first resume (and after resets/ROM changes) so the
+     * device callback cannot underrun between the first two main-loop ticks. */
+    if (!app.audio_device_started && SDL_GetAudioStreamQueued(app.audio_stream) >= bytes * 2)
+    {
+        if (SDL_ResumeAudioStreamDevice(app.audio_stream))
+            app.audio_device_started = true;
+        else
+            std::fprintf(stderr, "SDL audio resume failed: %s\n", SDL_GetError());
+    }
 }
 
 static void sdl3_apply_vsync(AppState &app)
@@ -574,8 +592,14 @@ static void sdl3_pace_frame(AppState &app)
         app.next_frame_ns += frame_ns;
 }
 
-static void set_defaults()
+static void set_defaults(bool reset_audio = true)
 {
+    const int audio_dc_blocker = option.audio_dc_blocker;
+    const int audio_highpass_hz = option.audio_highpass_hz;
+    const int audio_lowpass_hz = option.audio_lowpass_hz;
+    const int audio_limiter = option.audio_limiter;
+    const int audio_headroom_db = option.audio_headroom_db;
+
     std::memset(&option, 0, sizeof(option));
     option.fullscreen = 0;
     option.fullspeed = 1;
@@ -588,14 +612,25 @@ static void set_defaults()
     option.lcd_persistence = 1;
     option.lightgun_cursor = 1;
     option.lightgun_dpad_speed = 3;
-    
-    // To turn back on later if it does sound better
-    
-    option.audio_dc_blocker = 0;
-    option.audio_highpass_hz = 220;
-    option.audio_lowpass_hz = 5000;
-    option.audio_limiter = 0;
-    option.audio_headroom_db = 0;
+
+    if (reset_audio)
+    {
+        option.audio_dc_blocker = 1;
+        option.audio_highpass_hz = 20;
+        option.audio_lowpass_hz = 10000;
+        option.audio_limiter = 1;
+        option.audio_headroom_db = 3;
+    }
+    else
+    {
+        /* ROM loading resets machine options, but frontend audio settings are
+         * user preferences and must survive the reset. */
+        option.audio_dc_blocker = audio_dc_blocker;
+        option.audio_highpass_hz = audio_highpass_hz;
+        option.audio_lowpass_hz = audio_lowpass_hz;
+        option.audio_limiter = audio_limiter;
+        option.audio_headroom_db = audio_headroom_db;
+    }
 }
 
 static void normalize_audio_options()
@@ -757,13 +792,13 @@ static void load_sdl3_config(AppState &app)
         else if (key == "audio_headroom_db") option.audio_headroom_db = parse_clamped_int_value(value, option.audio_headroom_db, 0, 9);
     }
 
-    if (audio_config_version < 5)
+    if (audio_config_version < 6)
     {
         option.audio_dc_blocker = 1;
-        option.audio_highpass_hz = 220;
-        option.audio_lowpass_hz = 5000;
+        option.audio_highpass_hz = 20;
+        option.audio_lowpass_hz = 10000;
         option.audio_limiter = 1;
-        option.audio_headroom_db = 0;
+        option.audio_headroom_db = 3;
     }
 }
 
@@ -791,7 +826,7 @@ static void save_sdl3_config(const AppState &app)
     out << "audio_drop_stale=" << (app.audio_drop_stale ? 1 : 0) << "\n";
     out << "audio_latency_frames=" << app.audio_latency_frames << "\n";
     out << "audio_device_sample_frames=" << app.audio_device_sample_frames << "\n";
-    out << "audio_config_version=5\n";
+    out << "audio_config_version=6\n";
     out << "audio_dc_blocker=" << (option.audio_dc_blocker ? 1 : 0) << "\n";
     out << "audio_highpass_hz=" << option.audio_highpass_hz << "\n";
     out << "audio_lowpass_hz=" << option.audio_lowpass_hz << "\n";
@@ -1595,7 +1630,7 @@ static bool load_game(AppState &app, const std::string &path)
         app.rom_loaded = false;
     }
 
-    set_defaults();
+    set_defaults(false);
     apply_requested_machine_options(app, path);
     std::snprintf(option.game_name, sizeof(option.game_name), "%s", path.c_str());
     if (!load_rom(const_cast<char *>(path.c_str())))
@@ -2175,9 +2210,11 @@ static void parse_args(AppState &app, int argc, char **argv)
         else if (!std::strcmp(a, "--input-playback")) { if (const char *v = need(a)) app.input_playback_path = v; }
         else if (!std::strcmp(a, "--input-record")) { if (const char *v = need(a)) app.input_record_path = v; }
         else if (!std::strcmp(a, "--input-tap-frames")) { if (const char *v = need(a)) app.input_tap_frames = static_cast<uint32_t>(std::max(1, std::atoi(v))); }
+        else if (!std::strcmp(a, "--audio-dc-blocker")) option.audio_dc_blocker = 1;
         else if (!std::strcmp(a, "--no-audio-dc-blocker")) option.audio_dc_blocker = 0;
+        else if (!std::strcmp(a, "--audio-limiter")) option.audio_limiter = 1;
         else if (!std::strcmp(a, "--no-audio-limiter")) option.audio_limiter = 0;
-        else if (!std::strcmp(a, "--no-audio-drop")) app.audio_drop_stale = false;
+        else if (!std::strcmp(a, "--no-audio-drop") || !std::strcmp(a, "--no-audio-backpressure")) app.audio_drop_stale = false;
         else if (!std::strcmp(a, "--vsync")) app.vsync = true;
         else if (!std::strcmp(a, "--no-vsync")) app.vsync = false;
         else if (!std::strcmp(a, "--frame-limit")) app.frame_limit = true;
@@ -2722,12 +2759,11 @@ static void draw_menu(AppState &app)
             if (ImGui::Checkbox("Audio", &app.ui.audio) && !app.ui.audio)
                 sdl3_clear_audio_queue(app);
             ImGui::SameLine();
-            ImGui::Checkbox("Limit queued audio", &app.audio_drop_stale);
+            ImGui::Checkbox("Backpressure queued audio", &app.audio_drop_stale);
             ImGui::SliderInt("Audio queue limit (frames)", &app.audio_latency_frames, 1, 12);
             int queued_audio = app.audio_stream ? SDL_GetAudioStreamQueued(app.audio_stream) : 0;
-            ImGui::Text("SDL queued audio: %d bytes; waits: %llu; drops: %llu", queued_audio,
-                        static_cast<unsigned long long>(app.audio_backpressure_count),
-                        static_cast<unsigned long long>(app.audio_drop_count));
+            ImGui::Text("SDL queued audio: %d bytes; waits: %llu", queued_audio,
+                        static_cast<unsigned long long>(app.audio_backpressure_count));
             if (ImGui::Button("Clear queued audio")) sdl3_clear_audio_queue(app);
             ImGui::Separator();
             ImGui::TextUnformatted("Sound shaping");
@@ -2961,7 +2997,7 @@ static bool init_sdl(AppState &app)
         spec.channels = 2;
         spec.freq = SOUND_FREQUENCY;
         app.audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-        if (app.audio_stream) SDL_ResumeAudioStreamDevice(app.audio_stream);
+        /* Resume after sdl3_queue_audio_frame has prebuffered two frames. */
     }
     open_first_gamepad(app);
     return true;

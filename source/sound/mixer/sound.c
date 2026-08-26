@@ -134,6 +134,30 @@ static int16_t mix_saturate_i16(int32_t v)
 	return (int16_t)v;
 }
 
+static int32_t mix_soft_limit_i16(int32_t v)
+{
+	const int32_t knee = 28672;
+	const int32_t room = 32767 - knee;
+	int32_t sign = 1;
+	int64_t magnitude = v;
+
+	if (magnitude < 0)
+	{
+		sign = -1;
+		magnitude = -magnitude;
+	}
+	if (magnitude <= knee)
+		return v;
+
+	/* Unity slope at the knee and an asymptotic 16-bit ceiling.  The former
+	 * quarter-slope limiter could still exceed 32767 and fall through to hard
+	 * clipping, which is especially audible after Psycho Soldier's quiet OPL
+	 * output is normalized. */
+	magnitude = knee + ((magnitude - knee) * room) /
+	                       ((magnitude - knee) + room);
+	return sign * (int32_t)magnitude;
+}
+
 static void psg_write_backend(uint8_t chip, uint8_t data)
 {
 	if (chip == 0)
@@ -563,11 +587,7 @@ void MULTIREXZ80_snk_psychos_mixer_callback(int16_t *output, int32_t length)
 		v *= level;
 
 		if (option.audio_limiter)
-		{
-			const int32_t knee = 28672;
-			if (v > knee) v = knee + ((v - knee) >> 2);
-			else if (v < -knee) v = -knee + ((v + knee) >> 2);
-		}
+			v = mix_soft_limit_i16(v);
 
 		output[i * 2] = output[i * 2 + 1] = mix_saturate_i16(v);
 	}

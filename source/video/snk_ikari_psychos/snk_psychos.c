@@ -599,6 +599,12 @@ static void snk_ym_write(int chip, uint8_t offset, uint8_t data)
 
     if (chip < 0 || chip > 1) return;
     snk_psychos_sound_ensure_chips();
+    /* Render through the exact audio-CPU cycle of this register write before
+     * changing the chip state.  Deferring every write to the end of its
+     * scanline makes the old state disappear from the first part of the line
+     * and produces discontinuities that become audible as crackles once the
+     * unusually quiet Psycho Soldier mix is normalized for SDL playback. */
+    MULTIREXZ80_sound_sync_to_cpu();
     addr = (chip == 0) ? &snk.ym1_addr : &snk.ym2_addr;
 
     if (!(offset & 1))
