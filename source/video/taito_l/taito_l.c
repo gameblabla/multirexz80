@@ -48,6 +48,12 @@
 
 #define TAITOL_PAL_ENTRIES 256
 
+#ifdef MULTIREXZ80_RENDER_32BPP
+typedef uint32_t taitol_pixel_t;
+#else
+typedef uint16_t taitol_pixel_t;
+#endif
+
 /* YM2203 clock = 13.33056 MHz / 4 = 3.33264 MHz (1-CPU games). */
 #define TAITOL_YM2203_CLOCK 3332640u
 
@@ -76,6 +82,7 @@ typedef struct
     uint8_t *gfx16_dec;  /* 16x16 ROM tiles, 1 byte per pixel */
     uint8_t *vram_dec;   /* 8x8 VRAM tiles, 1 byte per pixel (RAM-based chars) */
     uint8_t *priority_bitmap;
+    taitol_pixel_t *frame_buffer;
     uint32_t *palette;    /* 256-entry RGB palette */
     int      gfx_decoded;
 
@@ -138,11 +145,13 @@ static int taitol_ensure_alloc(void)
     tl.gfx16_dec   = tl_xcalloc((size_t)TAITOL_GFX16_MAX * 256, 1);
     tl.vram_dec    = tl_xcalloc((size_t)TAITOL_VRAM_TILES * 64, 1);
     tl.priority_bitmap = tl_xcalloc(TAITOL_VISIBLE_WIDTH * TAITOL_VISIBLE_HEIGHT, 1);
+    tl.frame_buffer = tl_xcalloc(TAITOL_VISIBLE_WIDTH * TAITOL_VISIBLE_HEIGHT,
+                                 sizeof(*tl.frame_buffer));
     tl.palette     = (uint32_t *)calloc(TAITOL_PAL_ENTRIES, sizeof(uint32_t));
     if (!tl.main_rom || !tl.gfx_rom || !tl.vram || !tl.bitmap_ram ||
         !tl.palette_ram || !tl.work_ram || !tl.vregs || !tl.sprram_buf ||
         !tl.gfx8_dec || !tl.gfx16_dec || !tl.vram_dec ||
-        !tl.priority_bitmap || !tl.palette)
+        !tl.priority_bitmap || !tl.frame_buffer || !tl.palette)
     {
         taitol_free();
         return 0;
@@ -171,6 +180,7 @@ void taitol_free(void)
     free(tl.vregs); free(tl.sprram_buf);
     free(tl.gfx8_dec); free(tl.gfx16_dec); free(tl.vram_dec);
     free(tl.priority_bitmap);
+    free(tl.frame_buffer);
     free(tl.palette);
     memset(&tl, 0, sizeof(tl));
 }
@@ -324,9 +334,9 @@ static const int gfx_plane_offset[4] = { 8, 12, 0, 4 };
 static const int gfx_x_offset_8[8]  = { 3, 2, 1, 0, 19, 18, 17, 16 };
 static const int gfx_y_offset_8[8]  = { 0, 32, 64, 96, 128, 160, 192, 224 };
 static const int gfx_x_offset_16[16] =
-    { 3,2,1,0, 19,18,17,16, 131,130,129,128, 147,146,145,144 };
+    { 3,2,1,0, 19,18,17,16, 259,258,257,256, 275,274,273,272 };
 static const int gfx_y_offset_16[16] =
-    { 0,32,64,96,128,160,192,224, 256,288,320,352,384,416,448,480 };
+    { 0,32,64,96,128,160,192,224, 512,544,576,608,640,672,704,736 };
 
 static int taitol_gfx_pixel(const uint8_t *rom, uint32_t size, int is16,
                             uint32_t tile, int x, int y)
@@ -693,8 +703,8 @@ void taitol_reset(void)
     vdp.line = 0;
     bitmap.viewport.x = 0;
     bitmap.viewport.y = 0;
-    bitmap.viewport.w = TAITOL_VISIBLE_WIDTH;
-    bitmap.viewport.h = TAITOL_VISIBLE_HEIGHT;
+    bitmap.viewport.w = tl.rotate ? TAITOL_VISIBLE_HEIGHT : TAITOL_VISIBLE_WIDTH;
+    bitmap.viewport.h = tl.rotate ? TAITOL_VISIBLE_WIDTH : TAITOL_VISIBLE_HEIGHT;
     bitmap.viewport.changed = 1;
 }
 
@@ -704,7 +714,7 @@ void taitol_reset(void)
  * 16x16 layout.  The sprite code from sprite RAM is used directly as
  * the 16x16 tile index (the <<= 2 / >>= 2 in MAME is only for the
  * tile callback and nets to no change when no callback modifies it). */
-static void taitol_draw_sprite(uint32_t *dst, int pitch, uint32_t code,
+static void taitol_draw_sprite(taitol_pixel_t *dst, int pitch, uint32_t code,
                                int palette, int flipx, int flipy,
                                int x, int y, int clip_minx, int clip_maxx,
                                int clip_miny, int clip_maxy,
@@ -743,7 +753,7 @@ static void taitol_draw_sprite(uint32_t *dst, int pitch, uint32_t code,
  *   tilemap_y = (sy + VISIBLE_Y - scrolly) % 256
  *   tile = tilemap[tilemap_y/8 * 64 + tilemap_x/8]
  *   pen = gfx_decode(tile, tilemap_x%8, tilemap_y%8) */
-static void taitol_draw_bg_layer(uint32_t *dst, int pitch, int layer,
+static void taitol_draw_bg_layer(taitol_pixel_t *dst, int pitch, int layer,
                                  int scrollx, int scrolly, int xoffs,
                                  int opaque, int flip,
                                  int clip_minx, int clip_maxx,
@@ -765,7 +775,7 @@ static void taitol_draw_bg_layer(uint32_t *dst, int pitch, int layer,
         int tile_row = tm_y / 8;
         int pix_y = tm_y % 8;
         int row_off = base + (tile_row * 64) * 2;
-        uint32_t *dst_line = dst + sy * pitch;
+        taitol_pixel_t *dst_line = dst + sy * pitch;
 
         for (sx = clip_minx; sx <= clip_maxx; sx++)
         {
@@ -795,8 +805,8 @@ static void taitol_draw_bg_layer(uint32_t *dst, int pitch, int layer,
 
 static void taitol_render(void)
 {
-    uint32_t *dst = (uint32_t *)bitmap.data;
-    int pitch = (int)(bitmap.pitch / 4);
+    taitol_pixel_t *dst = tl.frame_buffer;
+    int pitch = TAITOL_VISIBLE_WIDTH;
     int minx = 0, maxx = (int)TAITOL_VISIBLE_WIDTH - 1;
     int miny = 0, maxy = (int)TAITOL_VISIBLE_HEIGHT - 1;
     int x, y;
@@ -820,12 +830,21 @@ static void taitol_render(void)
     taitol_decode_vram_tiles();
     taitol_update_palette();
 
+    if (!bitmap.data || !dst)
+        return;
+
+    bitmap.viewport.x = 0;
+    bitmap.viewport.y = 0;
+    bitmap.viewport.w = tl.rotate ? TAITOL_VISIBLE_HEIGHT : TAITOL_VISIBLE_WIDTH;
+    bitmap.viewport.h = tl.rotate ? TAITOL_VISIBLE_WIDTH : TAITOL_VISIBLE_HEIGHT;
+    bitmap.viewport.changed = 1;
+
     if (!tl_screen_enable())
     {
         for (y = 0; y < TAITOL_VISIBLE_HEIGHT; y++)
             for (x = 0; x < TAITOL_VISIBLE_WIDTH; x++)
                 dst[y * pitch + x] = 0;
-        return;
+        goto present;
     }
 
     if (tl_bitmap_mode())
@@ -842,7 +861,7 @@ static void taitol_render(void)
                 dst[y * pitch + x] = tl.palette[tl.bitmap_ram[count + (res_x & 0x1ff)] & 0xff];
             }
         }
-        return;
+        goto present;
     }
 
     /* Clear with pen 0. */
@@ -931,7 +950,34 @@ static void taitol_render(void)
         }
     }
 
-    bitmap.viewport.changed = 1;
+present:
+    /* Apply the cabinet orientation in the hardware-independent renderer so
+     * SDL 1.2, SDL3, libretro, headless and other frontends all see the same
+     * correctly oriented active viewport.  MAME ROT270 maps a source pixel
+     * (x, y) to (y, width - 1 - x). */
+    if (tl.rotate)
+    {
+        int out_w = TAITOL_VISIBLE_HEIGHT;
+        int out_h = TAITOL_VISIBLE_WIDTH;
+        if (out_w > (int)bitmap.width) out_w = (int)bitmap.width;
+        if (out_h > (int)bitmap.height) out_h = (int)bitmap.height;
+        for (y = 0; y < out_h; y++)
+        {
+            taitol_pixel_t *out = (taitol_pixel_t *)(void *)(bitmap.data + (size_t)y * bitmap.pitch);
+            for (x = 0; x < out_w; x++)
+                out[x] = dst[x * pitch + (TAITOL_VISIBLE_WIDTH - 1 - y)];
+        }
+    }
+    else
+    {
+        int out_w = TAITOL_VISIBLE_WIDTH;
+        int out_h = TAITOL_VISIBLE_HEIGHT;
+        if (out_w > (int)bitmap.width) out_w = (int)bitmap.width;
+        if (out_h > (int)bitmap.height) out_h = (int)bitmap.height;
+        for (y = 0; y < out_h; y++)
+            memcpy(bitmap.data + (size_t)y * bitmap.pitch, dst + y * pitch,
+                   (size_t)out_w * sizeof(*dst));
+    }
 }
 
 /* Return whether the current game uses ROT270 orientation. */

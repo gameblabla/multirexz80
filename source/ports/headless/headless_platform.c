@@ -162,8 +162,8 @@ static int y4m_open(multirexz80_headless_platform_t *p)
     }
     else if (sms.console == CONSOLE_TAITOL)
     {
-        p->video_w = TAITOL_VISIBLE_WIDTH;
-        p->video_h = TAITOL_VISIBLE_HEIGHT;
+        p->video_w = taitol_needs_rotation() ? TAITOL_VISIBLE_HEIGHT : TAITOL_VISIBLE_WIDTH;
+        p->video_h = taitol_needs_rotation() ? TAITOL_VISIBLE_WIDTH : TAITOL_VISIBLE_HEIGHT;
     }
     else
     {

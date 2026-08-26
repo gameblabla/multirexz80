@@ -415,24 +415,6 @@ static uint32_t *capture_state_thumbnail(uint32_t *out_w, uint32_t *out_h, uint3
         for (x = 0; x < w; x++)
             pixels[(size_t)y * w + x] = headless_read_xrgb8888(x0 + x, y);
 
-    /* Apply ROT270 rotation for Taito L games that need it. */
-#if MULTIREXZ80_ENABLE_ARCADE
-    if (sms.console == CONSOLE_TAITOL && taitol_needs_rotation())
-    {
-        uint32_t *rot = (uint32_t *)malloc((size_t)w * h * sizeof(uint32_t));
-        if (rot)
-        {
-            /* ROT270: new[x][h-1-y] = old[y][x], result is h wide x w tall */
-            for (y = 0; y < h; y++)
-                for (x = 0; x < w; x++)
-                    rot[(size_t)x * h + (h - 1 - y)] = pixels[(size_t)y * w + x];
-            free(pixels);
-            pixels = rot;
-            uint32_t tmp = w; w = h; h = tmp;
-        }
-    }
-#endif
-
     *out_w = w;
     *out_h = h;
     *out_pitch = w * 4;
