@@ -206,14 +206,26 @@ static int snk_uses_two_ym3526(void)
 
 int snk_psychos_audio_mixer_gain_num(int headroom_db)
 {
-    /* MAME routes Athena/Ikari's two OPL1 devices at 2.0, while the
-     * bermudat/GWAR-family boards used by Psycho Soldier, Victory Road,
-     * Guerrilla War, Touchdown Fever, and Chopper route their OPL pair at
-     * 1.0.  The old mixer always used the louder Ikari-style path, and the
-     * frontend post-filter then boosted that again, producing clipped/noisy
-     * Chopper audio.  Return the route-calibrated fixed-point gain numerator
-     * used by the SNK mixer; denominator remains 512. */
-    int base = snk_uses_two_ym3526() ? 1024 : 384;
+    /* MAME routes both of Psycho Soldier's OPL devices at 2.0.  Do not group
+     * it with Chopper: that board replaces its first chip with a YM3812 at a
+     * lower route gain.  Doing so reduced Psycho Soldier to 0.75x here and
+     * made its already quiet attract-mode audio effectively inaudible in the
+     * SDL3 frontend.  The mixer denominator is 512, so 1024 represents the
+     * 2.0 route used by Psycho Soldier and the other full-gain SNK boards. */
+    int base;
+    switch (snk.game_type)
+    {
+        case SNK_GAME_TDFEVER:
+            base = 512;
+            break;
+        case SNK_GAME_CHOPPER:
+            /* Preserve the board-specific balance calibrated for Chopper. */
+            base = 384;
+            break;
+        default:
+            base = 1024;
+            break;
+    }
     if (headroom_db <= 0) return base;
     if (headroom_db <= 3) return (base * 724 + 512) / 1024;
     if (headroom_db <= 6) return (base * 512 + 512) / 1024;
